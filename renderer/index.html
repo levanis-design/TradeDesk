@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>TradeDesk</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><span class="mark" aria-hidden="true">TD</span><span class="brandname">TradeDesk</span><button id="navToggle" class="navtoggle" type="button" aria-controls="nav navFoot" aria-expanded="true" aria-label="Collapse the menu" title="Collapse the menu (Ctrl+B)"></button></div>
+      <nav id="nav" aria-label="Sections"></nav>
+      <nav id="navFoot" class="navfoot" aria-label="Settings and help"></nav>
+      <div class="side-foot">
+        <div id="engineChip" class="chip" title="Analysis engine"></div>
+        <div id="modelChip" class="chip muted" title="Model in use"></div>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="top">
+        <h1 id="pageTitle"></h1>
+        <div class="top-right">
+          <span id="jobChip" class="chip job" hidden></span>
+          <button id="cancelBtn" class="btn danger" hidden title="Stops the running job and clears everything waiting in the queue">Cancel all</button>
+        </div>
+      </header>
+      <main id="view" tabindex="-1"></main>
+      <footer class="disclaimer">Research aid built on language models. It can be wrong, it is not financial advice, and it places no orders. You make the decision.</footer>
+    </div>
+  </div>
+  <div id="modal" class="modal" hidden></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="util.js"></script>
+  <script src="advice.js"></script>
+  <script src="portfolio.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+  <script src="split.js"></script>
+  <script src="result.js"></script>
+  <script src="analyze.js"></script>
+  <script src="queue.js"></script>
+  <script src="watch.js"></script>
+  <script src="holdings.js"></script>
+  <script src="pages.js"></script>
+  <script src="calendar.js"></script>
+  <script src="track.js"></script>
+  <script src="setup.js"></script>
+  <script src="legal.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>

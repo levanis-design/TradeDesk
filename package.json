@@ -1,0 +1,44 @@
+{
+  "name": "tradedesk",
+  "productName": "TradeDesk",
+  "version": "2.1.0",
+  "description": "Local market research desk: TradingAgents with a local model, your holdings, a decision journal and scoring",
+  "main": "src/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "test:py": "python -m unittest tests/test_briefing.py tests/test_calendar_bars.py",
+    "test:ui": "node tests/ui-harness.js",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.tradedesk",
+    "productName": "TradeDesk",
+    "files": [
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "engine",
+        "to": "engine"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

@@ -1,0 +1,45 @@
+# Changelog
+
+## Unreleased — security review (2026-10-25)
+- Validate every IPC caller against the current window, main frame, and exact app document.
+- Isolate the Python engine from ambient credentials, provider overrides, tracing settings, and import hooks.
+- Require an exact trusted Ollama installer publisher, use unique temporary directories, and handle download stream failures.
+- Treat spreadsheet account names as dictionary keys without inherited object properties.
+- Reject external links containing embedded credentials or alternate ports and handle browser launch errors.
+- Update the private Python package installer before installing engine dependencies.
+- Run component and security regression tests in the default test suite; exclude credentials, dependencies, and generated artifacts from Git.
+
+## 2.1.0
+- Calendar is its own menu item (it was a tab under Track record).
+- Menu has icons, folds to icons only (arrow or Ctrl+B, remembered), and Alt+1 to Alt+7 jump to a screen.
+- Setup is compact and split into tabs: Components, Model and run settings, API keys, This computer.
+- Setup installs what is missing: Python (winget), the engine, Ollama (download, signature check, install, start) and models (download with progress), one at a time or all at once. Each item says what it is for, its size and its source.
+- Model downloads in This computer replace the copy-and-paste `ollama pull` command.
+- README lists every app and tool used.
+
+## 2.0.0
+- Calendar tab under Track record: company results and dividend dates, Federal Reserve decisions, inflation and jobs releases, options expiry, plus events you add yourself.
+- Draggable dividers on Analyze and the Watchlist; sizes are remembered.
+- Holdings: sortable columns; current price and cost basis can be typed over; Refresh prices; candles with 1, 5, 15 minute, hour, day and week bars, for the portfolio or one holding.
+- Fixed: the profit or loss chart overlapped a long negative label; Holdings no longer overflows sideways in a narrow window.
+- New navigation: Analyze, Watchlist, Holdings, Track record; Setup and How it works in the footer. Setup shows a badge until the engine is installed and the model check has passed.
+- Analyze redesigned as four panes with the Queue as a tab. Ticker statistics and a chart appear when a ticker is selected.
+- Results open on a Briefing: the decision that is yours, reasons for and against with checked quotes, what would change the call, and how this model's rating did in your backtests. News tab added.
+- Run depth: Fast, Standard, Thorough.
+- Watchlist is a list with a detail pane. The blocking "run all" was replaced by queueing.
+- Holdings: summary, allocation, profit or loss and holdings-over-time charts, live prices; import, paste and add-row moved below the table.
+- Journal and Backtest merged into Track record, cross-linked.
+- Launch notice on every start; How it works page.
+- Engine: `quote` (prices, statistics, headlines) and `brief` commands; the briefing is a new stage of each run.
+
+## 1.1.2
+- Both the quick and the deep model are checked before a run; the message names the missing one.
+
+## 1.1.1
+- Time-left estimates per stage; waiting items show when they will finish.
+
+## 1.1.0
+- Queue, Cancel all, paste-from-spreadsheet import, columns Stock / QTY / Current Price / Purchase Price / Current total / Bought At / Profit/Loss.
+
+## 1.0.x
+- First releases and engine-install fixes.
