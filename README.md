@@ -90,17 +90,20 @@ The app window has no network access of its own (Content Security Policy `connec
 ## Tests
 
 ```
-npm test            # logic, process and interface-logic tests, no Electron needed
+npm test            # logic, process, component and security tests, no Electron needed
+npm run test:py     # briefing, market bars and calendar tests (requires pandas)
 TD_PY=/path/to/venv/python NODE_PATH=$(npm root -g) npm run test:ui
 ```
 
-`test:ui` loads the real interface in Chromium, drives the real IPC handlers and the real Python engine, and replaces only the model (a fake local server) and market prices (deterministic). It covers the launch notice, boot, setup, model check, holdings import and charts, the four-pane Analyze page, the briefing and its quote checks, news, queue, cancel, failure, watchlist, track record, backtest, link and path safety, and layout at three window sizes.
+`test:ui` loads the real interface in Chromium, drives the real IPC handlers and the real Python engine, and replaces the model with a fake local server and external market/social feeds with deterministic fixtures. It covers the launch notice, boot, setup, model check, holdings import and charts, the four-pane Analyze page, the briefing and its quote checks, news, queue, cancel, failure, watchlist, track record, backtest, link and path safety, and layout at three window sizes.
+
+The UI harness requires Playwright and its Chromium browser. Set `TD_CHROMIUM` to use an existing compatible Chromium executable. The test fixtures replace instrument profiles, past-decision settlement prices, and prefetched sentiment feeds as well as UI quotes, so the fake-model run does not depend on live market or social data.
 
 ## Not verified
 
-Verified here: the engine against TradingAgents at the pinned commit with a fake model, the interface in Chromium, and all logic and handlers.
+The automated suites cover the engine against TradingAgents at the pinned commit with a fake model, the interface in Chromium, and app logic and handlers. See [SECURITY.md](SECURITY.md) for the security review's exact verification scope.
 
-Not verified, because this build environment has no Windows, no GPU, no Ollama and no access to Yahoo Finance:
+The deterministic tests do not validate the following release and live-service behavior:
 
 - Electron on Windows (window, installer, `npm run dist`)
 - Engine installation on your computer. The installer logic (Python discovery, virtual environment, pinned source with a git fallback) is tested with fakes only. In the build environment TradingAgents was installed from a local clone of the same commit, because GitHub zip downloads were blocked there

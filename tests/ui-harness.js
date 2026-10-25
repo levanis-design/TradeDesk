@@ -584,6 +584,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('a single run is refused while the queue works', clash.ok === false && /Another job is running/.test(clash.error), JSON.stringify(clash));
   await page.waitForSelector('#qbody .badge.warn:has-text("Running")', { timeout: 20000 });
   check('queue has a Time left column beside the summary', await page.evaluate(() => { const th = [...document.querySelectorAll('#qbody th')].map((x) => x.textContent); return th.indexOf('Time left') >= 0 && th.indexOf('Time left') === th.indexOf('Summary') - 1; }));
+  // A queue item becomes running before preflight creates its first estimate.
+  await page.waitForFunction(() => [...document.querySelectorAll('#qbody tbody td .eta')]
+    .some((el) => /left|longer than usual|under 1 min/.test(el.textContent)), null, { timeout: 20000 });
   const leftTexts = await page.locator('#qbody tbody td .eta').allInnerTexts();
   check('running row shows a live time-left text', leftTexts.some((t) => /left|longer than usual|under 1 min/.test(t)), JSON.stringify(leftTexts));
   check('waiting rows show when they will be done', leftTexts.some((t) => /done in/.test(t)), JSON.stringify(leftTexts));

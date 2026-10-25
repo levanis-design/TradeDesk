@@ -20,8 +20,9 @@ IPC restrictions follow [Electron's security guidance](https://www.electronjs.or
 
 ## Verification
 
-- `npm test` includes logic, process, component-installation, renderer-logic, and security regression suites.
-- `npm run test:py` exercises briefing validation and market/calendar commands with deterministic data.
+- `npm test`: 77 passing logic, process, component-installation, renderer-logic, and security regression tests.
+- `npm run test:py`: 21 passing tests for briefing validation and market/calendar commands with deterministic data.
+- Chromium UI harness: 229 checks passed, zero failed. It exercised real app handlers and the installed engine with a fake model and deterministic external-feed fixtures, including import, analyses, queues, cancellation, backtests, link/path safety, and responsive layouts. The in-process browser driver explicitly bypasses Electron frame authentication; the dedicated IPC security tests separately exercise the sender guard.
 - Live `npm audit`: zero known vulnerabilities in the lockfile (419 dependencies reported).
 - `pip-audit` examined 89 installed engine package records. After the pip update, zero known vulnerabilities were reported among auditable packages. TradingAgents 0.7.0 was skipped because it is installed from GitHub and is not present in the advisory service's PyPI package catalog.
 - Source checks for common embedded credential formats found no matching production secrets. `.gitignore` excludes environment files, private-key files, installed dependencies, audit tooling, bytecode, and generated UI artifacts.
@@ -31,7 +32,7 @@ IPC restrictions follow [Electron's security guidance](https://www.electronjs.or
 - TradingAgents is pinned to commit `e8f5503e9b86d5c2710b0c76b1f686703968c9df`. This review does not certify its complete source or all behavior of downloaded models and external services. Python transitive dependencies are resolved at installation time; audit the actual environment again after upgrades.
 - Local holdings, journals, settings, and reports are ordinary files under the user profile. API keys are encrypted; the rest of the financial data is not encrypted by the app. Protect the Windows account and disk.
 - Model endpoints are configurable and support HTTP for local servers. Use loopback addresses or HTTPS on a trusted server. A remote HTTP endpoint exposes prompts and holdings to network observers. Selecting a cloud provider or a remote model server sends the requested context there.
-- Authenticode verification is tested with simulated signatures; a real Ollama installer was not downloaded or executed during this review. Python/Git installation, GPU behavior, live market data, and a production model were not exercised.
+- Authenticode verification is tested with simulated signatures; a real Ollama installer was not downloaded or executed during this review. Python/Git installation, GPU behavior, live market data accuracy, and a production model were not validated.
 - Windows installer packaging, code signing, and a packaged Electron security review remain release checks. The browser UI harness does not certify the packaged Electron binary.
 - Keep Electron, Node dependencies, Python, engine dependencies, and Ollama patched. Advisory results describe the audit date and installed versions only.
 
