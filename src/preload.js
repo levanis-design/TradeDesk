@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('td', {
   quote: call('quote:get'),
   bars: call('bars:get'),
   calendar: call('calendar:get'),
+  eventMove: call('event:move'),
   events: call('events:get'),
   saveEvents: call('events:save'),
   makeBrief: call('brief:make'),

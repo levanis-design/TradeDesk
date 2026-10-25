@@ -8,14 +8,53 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import tradedesk_engine as E  # noqa: E402
 
 DAILY = {"NVDA": 0.004, "SPY": 0.001, "GOOG": -0.002, "AAPL": 0.002, "MSFT": 0.001}
+# TD_FAKE_SCALE shrinks the invented price drift so documentation screenshots show believable numbers. Tests leave it at 1.
+SCALE = float(os.environ.get("TD_FAKE_SCALE", "1"))
 
 
 class FakeTicker:
     def __init__(self, symbol):
         self.symbol = symbol
-        self.rate = DAILY.get(symbol, 0.0005)
+        self.rate = DAILY.get(symbol, 0.0005) * SCALE
 
-    def history(self, period="5y", interval="1d", auto_adjust=False):
+    def _window(self, start, end, interval):
+        """Deterministic bars between two dates. NVDA jumps 5 percent on 2026-10-14 and fades 2 percent the next day."""
+        if self.symbol == "NOPE" or self.symbol.startswith("PAST"):
+            return pd.DataFrame()
+        days = pd.bdate_range(start=start, end=pd.Timestamp(end) - pd.Timedelta(days=1))
+        days = days[days <= pd.Timestamp("2026-10-23")]
+        if interval == "5m":
+            rows, idx = [], []
+            for d in days:
+                px = 100.0
+                for k in range(78):
+                    ts = (d + pd.Timedelta(hours=9, minutes=30 + 5 * k)).tz_localize("America/New_York")
+                    o = px
+                    px *= 1.0004 if (self.symbol == "NVDA" and ts.hour >= 14) else 1.0
+                    rows.append({"Open": o, "Close": px, "High": max(o, px), "Low": min(o, px), "Volume": 100})
+                    idx.append(ts)
+            return pd.DataFrame(rows, index=pd.DatetimeIndex(idx))
+        px, rows = 100.0, []
+        for d in days:
+            o = px
+            if self.symbol == "NVDA" and d == pd.Timestamp("2026-10-14"):
+                px *= 1.05
+            elif self.symbol == "NVDA" and d == pd.Timestamp("2026-10-15"):
+                px *= 0.98
+            else:
+                px *= 1.001
+            rows.append({"Open": o * 1.01 if d == pd.Timestamp("2026-10-14") else o, "Close": px, "High": max(o, px) * 1.01, "Low": min(o, px) * 0.99, "Volume": 1000})
+        return pd.DataFrame(rows, index=days)
+
+    def get_earnings_dates(self, limit=12):
+        if self.symbol != "NVDA":
+            return pd.DataFrame()
+        idx = pd.DatetimeIndex([pd.Timestamp("2026-08-27 16:30", tz="America/New_York"), pd.Timestamp("2026-05-28 16:30", tz="America/New_York"), pd.Timestamp("2026-11-18 00:00", tz="America/New_York")])
+        return pd.DataFrame({"EPS Estimate": [1.0, 0.9, 1.1], "Reported EPS": [1.1, 0.8, float("nan")], "Surprise(%)": [10.0, -11.1, float("nan")]}, index=idx)
+
+    def history(self, period="5y", interval="1d", auto_adjust=False, start=None, end=None):
+        if start is not None:
+            return self._window(start, end, interval)
         if self.symbol == "NOPE" or self.symbol.startswith("PAST"):
             return pd.DataFrame()
         if interval != "1d" or not period.endswith("y"):
@@ -26,14 +65,14 @@ class FakeTicker:
             px, rows = 100.0, []
             for i, _ in enumerate(idx):
                 o = px
-                px *= 1 + self.rate + (0.002 if i % 3 == 0 else -0.0015)
+                px *= 1 + self.rate + (0.002 if i % 3 == 0 else -0.0015) * SCALE
                 rows.append({"Open": o, "Close": px, "High": max(o, px) * 1.002, "Low": min(o, px) * 0.998, "Volume": 1000 + i})
             return pd.DataFrame(rows, index=idx)
         years = int(period.rstrip("y"))
         idx = pd.bdate_range(end="2026-10-23", periods=252 * years)
         px, rows = 100.0, []
         for i, _ in enumerate(idx):
-            px *= 1 + self.rate + (0.004 if i % 7 == 0 else -0.003 if i % 5 == 0 else 0)
+            px *= 1 + self.rate + (0.004 if i % 7 == 0 else -0.003 if i % 5 == 0 else 0) * (SCALE if SCALE != 1 else 1)
             rows.append({"Open": px * 0.998, "Close": px, "High": px * 1.01, "Low": px * 0.99, "Volume": 1_000_000 + i})
         return pd.DataFrame(rows, index=idx)
 

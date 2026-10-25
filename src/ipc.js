@@ -30,6 +30,7 @@ function createIpc(ctx) {
   let quoteChain = Promise.resolve();
   const barsCache = new Map();
   const calCache = new Map();
+  const moveCache = new Map();
   let readChain = Promise.resolve();
   const importCache = new Map();
 
@@ -525,15 +526,16 @@ function createIpc(ctx) {
     });
 
     // ---- upcoming events that can move prices, plus the ones the person added by hand
-    h('calendar:get', async ({ tickers, days = 90, force = false } = {}) => {
+    h('calendar:get', async ({ tickers, days = 90, back = 365, force = false } = {}) => {
       const list = [...new Set((tickers || []).map(cleanTicker).filter(Boolean))].slice(0, 40);
       if (!engineReady()) return fail('The analysis engine is not installed yet, so market events cannot be fetched. Open Setup.');
       const d = Math.max(7, Math.min(365, Math.round(Number(days) || 90)));
-      const key = `${list.slice().sort().join(',')}|${d}`;
+      const b = Math.max(1, Math.min(400, Math.round(Number(back) || 365)));
+      const key = `${list.slice().sort().join(',')}|${d}|${b}`;
       const c = calCache.get(key);
       if (!force && c && Date.now() - c.at < 30 * 60 * 1000) return { ok: true, ...c.data, cached: true };
       const run = readChain.then(async () => {
-        const job = startEngine({ cmd: 'calendar', tickers: list, days: d });
+        const job = startEngine({ cmd: 'calendar', tickers: list, days: d, back: b });
         const res = await job.promise;
         if (!res.ok) throw new Error(res.error || 'Calendar request failed.');
         return { events: res.result.events || [], notes: res.result.notes || [], start: res.result.start, end: res.result.end, fetchedAt: new Date().toISOString() };
@@ -541,6 +543,28 @@ function createIpc(ctx) {
       readChain = run.catch(() => {});
       const data = await run;
       calCache.set(key, { at: Date.now(), data });
+      return { ok: true, ...data };
+    });
+
+    // How prices moved around one past event. Cached ten minutes: past prices do not change, today's can.
+    h('event:move', async ({ symbols, date, time = '', force = false } = {}) => {
+      if (!engineReady()) return fail('The analysis engine is not installed yet, so market data cannot be fetched. Open Setup.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return fail('That is not a valid event date.');
+      const t = /^\d{2}:\d{2}$/.test(String(time || '')) ? String(time) : '';
+      const list = [...new Set((symbols || []).map((x) => { try { return cleanTicker(x); } catch { return ''; } }).filter(Boolean))].slice(0, 4);
+      if (!list.length) return fail('Name at least one symbol.');
+      const key = `${list.join(',')}|${date}|${t}`;
+      const c = moveCache.get(key);
+      if (!force && c && Date.now() - c.at < 10 * 60 * 1000) return { ok: true, ...c.data, cached: true };
+      const run = readChain.then(async () => {
+        const job = startEngine({ cmd: 'eventmove', symbols: list, date, time: t });
+        const res = await job.promise;
+        if (!res.ok) throw new Error(res.error || 'Market data request failed.');
+        return { date: res.result.date, time: res.result.time, timing: res.result.timing, items: res.result.items || [] };
+      });
+      readChain = run.catch(() => {});
+      const data = await run;
+      moveCache.set(key, { at: Date.now(), data });
       return { ok: true, ...data };
     });
     h('events:get', () => ({ ok: true, events: store.getMeta().customEvents || [] }));

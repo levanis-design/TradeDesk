@@ -154,6 +154,60 @@
     return wrap;
   }
 
+
+  // Several series as percent change from a common starting point, spaced by trading day, with a vertical marker.
+  // opts: { series:[{name, points:[[date, fraction]]}], mark:'YYYY-MM-DD', markLabel, height }
+  function compare(opts) {
+    const H = opts.height || 220;
+    const wrap = h('div', { class: 'chart' });
+    const stage = h('div', { class: 'chart-stage' });
+    wrap.append(stage);
+    const sign = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%`;
+    let svg = null;
+    function draw() {
+      if (svg) svg.remove();
+      const W = Math.max(260, stage.clientWidth || 560);
+      svg = s('svg', { class: 'chart-svg', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': opts.name || 'Price change around the event' });
+      stage.append(svg);
+      const dates = [...new Set(opts.series.flatMap((x) => x.points.map((p) => p[0])))].sort();
+      if (dates.length < 2) { svg.append(s('text', { x: W / 2, y: H / 2, class: 'chart-empty', 'text-anchor': 'middle' }, 'Not enough data to draw this.')); return; }
+      const all = opts.series.flatMap((x) => x.points.map((p) => p[1])).concat([0]);
+      let lo = Math.min(...all); let hi = Math.max(...all);
+      const padv = (hi - lo) * 0.1 || 0.01; lo -= padv; hi += padv;
+      const yt = ticks(lo * 100, hi * 100, 4).map((v) => v / 100);
+      lo = Math.min(lo, yt[0]); hi = Math.max(hi, yt[yt.length - 1]);
+      const pad = { l: 50, r: 46, t: 10, b: 22 };
+      const X = (d) => pad.l + (dates.indexOf(d) / (dates.length - 1)) * (W - pad.l - pad.r);
+      const Y = (v) => pad.t + (1 - (v - lo) / (hi - lo || 1)) * (H - pad.t - pad.b);
+      const g = s('g');
+      yt.forEach((v) => { if (v < lo || v > hi) return; g.append(s('line', { class: v === 0 ? 'grid zero' : 'grid', x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v) }), s('text', { class: 'axis', x: pad.l - 6, y: Y(v) + 4, 'text-anchor': 'end' }, `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v * 100).toFixed(Math.abs(v) < 0.1 ? 1 : 0)}%`)); });
+      [0, Math.floor((dates.length - 1) / 2), dates.length - 1].forEach((i, k) => g.append(s('text', { class: 'axis', x: X(dates[i]), y: H - 6, 'text-anchor': k === 0 ? 'start' : k === 2 ? 'end' : 'middle' }, dateLabel(dates[i], 30))));
+      if (opts.mark && dates.includes(opts.mark)) {
+        const mx = X(opts.mark);
+        g.append(s('line', { class: 'eventmark', x1: mx, x2: mx, y1: pad.t, y2: H - pad.b }), s('text', { class: 'axis eventname', x: mx + 4, y: pad.t + 10 }, opts.markLabel || 'event'));
+      }
+      const usedY = [];
+      opts.series.forEach((x, i) => {
+        const pts = x.points.filter((p) => dates.includes(p[0]));
+        if (pts.length < 2) return;
+        g.append(s('path', { class: `cmpline cs${i}`, d: pts.map((p, j) => `${j ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('') }));
+        pts.forEach((p) => g.append(s('circle', { class: `cmpdot cs${i}`, cx: X(p[0]), cy: Y(p[1]), r: 2.6 }, s('title', null, `${x.name}, ${p[0]}: ${sign(p[1])}`))));
+        const last = pts[pts.length - 1];
+        let ly = Y(last[1]) + 4;
+        while (usedY.some((u) => Math.abs(u - ly) < 12)) ly += 12;
+        usedY.push(ly);
+        g.append(s('text', { class: `cmplabel cs${i}`, x: X(last[0]) + 5, y: ly }, x.name));
+      });
+      svg.append(g);
+    }
+    let lastW = 0;
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { const w = stage.clientWidth; if (w && Math.abs(w - lastW) > 2) { lastW = w; draw(); } }) : null;
+    if (ro) ro.observe(stage);
+    requestAnimationFrame(() => { if (!lastW) draw(); });
+    wrap.redraw = draw;
+    return wrap;
+  }
+
   // Candles or a close line over bars, spaced by bar rather than by clock so nights and weekends leave no gaps.
   // opts: { bars:[[time,o,h,l,c,v]], style:'candles'|'line', height, fmt, name, showVolume, approx }
   function ohlc(opts) {
@@ -321,5 +375,5 @@
     return wrap;
   }
 
-  window.TDCharts = { line, ohlc, spark, donut, bars, rangeBar, colorClass, compact, s };
+  window.TDCharts = { line, compare, ohlc, spark, donut, bars, rangeBar, colorClass, compact, s };
 })();

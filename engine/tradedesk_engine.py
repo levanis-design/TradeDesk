@@ -348,12 +348,41 @@ BLS_KEEP = (
 )
 
 
+# Release dates read from the BLS schedule pages on 2026-10-25 (bls.gov/schedule/news_release). Used only when the live feed
+# cannot be fetched, so the calendar still lists the next inflation and jobs releases. All at 8:30 am Eastern.
+BLS_FALLBACK = {
+    "Employment Situation": ["2026-11-06", "2026-12-04", "2027-01-08", "2027-02-05", "2027-03-05", "2027-04-02", "2027-05-07", "2027-06-04",
+                             "2027-07-02", "2027-08-06", "2027-09-03", "2027-10-08", "2027-11-05", "2027-12-03"],
+    "Consumer Price Index": ["2026-11-10", "2026-12-10", "2027-01-13", "2027-02-11", "2027-03-10", "2027-04-13", "2027-05-12", "2027-06-10",
+                             "2027-07-14", "2027-08-11", "2027-09-14", "2027-10-14", "2027-11-10", "2027-12-10"],
+    "Producer Price Index": ["2026-11-13", "2026-12-15", "2027-01-14", "2027-02-12", "2027-03-12", "2027-04-14", "2027-05-13", "2027-06-11",
+                             "2027-07-15", "2027-08-10", "2027-09-10", "2027-10-15", "2027-11-12", "2027-12-15"],
+    "Job Openings and Labor Turnover": ["2026-12-01"],
+}
+BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
+
 def _http_get(url, timeout=12):
+    """Some government sites refuse unfamiliar clients, so try a browser-style request first, then a plain one."""
+    import urllib.error
     import urllib.request
 
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 TradeDesk"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec - fixed https url above
-        return r.read().decode("utf-8", "replace")
+    last = None
+    for ua in (BROWSER_UA, "TradeDesk/2 (personal market research; calendar feed)"):
+        headers = {"User-Agent": ua, "Accept": "text/calendar,text/plain,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9"}
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:  # nosec - fixed https url
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            last = exc
+        except Exception as exc:
+            last = exc
+    raise last
+
+
+def _why(exc):
+    code = getattr(exc, "code", None)
+    return f"HTTP {code}" if code else type(exc).__name__
 
 
 def _parse_ics(text):
@@ -379,13 +408,35 @@ def _third_friday(year, month):
     return first_fri + dt.timedelta(days=14)
 
 
-def _calendar_for_ticker(sym, lo, hi):
+def _hhmm_et(ts):
+    """Clock time in New York for a Yahoo timestamp, or '' when Yahoo gave only a date."""
+    try:
+        t = ts.tz_convert("America/New_York") if getattr(ts, "tzinfo", None) is not None else ts
+        return "" if (t.hour == 0 and t.minute == 0) else t.strftime("%H:%M")
+    except Exception:
+        return ""
+
+
+def _earnings_detail(row, past):
+    est, rep, sur = _num(row.get("EPS Estimate")), _num(row.get("Reported EPS")), _num(row.get("Surprise(%)"))
+    if past and rep is not None and est is not None:
+        tail = f" ({sur:+.1f}% versus expectations)" if sur is not None else ""
+        return f"Reported earnings per share of {rep:.2f} against {est:.2f} expected{tail}."
+    if past:
+        return "Quarterly results were published on this date."
+    return "Quarterly earnings. Results and guidance often move the stock several percent either way." + (f" Analysts expect earnings per share of {est:.2f}." if est is not None else "")
+
+
+def _calendar_for_ticker(sym, lo, hi, today=None):
+    import datetime as dt
+
+    today = today or dt.date.today()
     t = _yf_ticker(sym)
     events = []
 
-    def add(date, kind, title, detail, impact):
+    def add(date, kind, title, detail, impact, time=""):
         if date and lo <= date <= hi:
-            events.append({"date": date, "time": "", "kind": kind, "ticker": sym, "title": title, "detail": detail, "impact": impact, "source": "Yahoo Finance"})
+            events.append({"date": date, "time": time, "kind": kind, "ticker": sym, "title": title, "detail": detail, "impact": impact, "source": "Yahoo Finance"})
 
     cal = None
     try:
@@ -393,6 +444,20 @@ def _calendar_for_ticker(sym, lo, hi):
     except Exception as exc:
         sys.stderr.write(f"calendar({sym}) failed: {exc}\n")
     seen = set()
+    seen_div = set()
+    # Dates with a clock time and, for past quarters, the result against expectations.
+    try:
+        ed = t.get_earnings_dates(limit=16)
+        if ed is not None and not ed.empty:
+            for ts, row in ed.iterrows():
+                d = _iso_date(ts)
+                if not d or d in seen:
+                    continue
+                seen.add(d)
+                past = d <= today.isoformat() and _num(row.get("Reported EPS")) is not None
+                add(d, "earnings", f"{sym} quarterly results", _earnings_detail(row, past or d < today.isoformat()), "high", _hhmm_et(ts))
+    except Exception as exc:
+        sys.stderr.write(f"earnings_dates({sym}) failed: {exc}\n")
     if isinstance(cal, dict):
         ed = cal.get("Earnings Date")
         for e in (ed if isinstance(ed, (list, tuple)) else [ed]):
@@ -400,16 +465,32 @@ def _calendar_for_ticker(sym, lo, hi):
             if d and d not in seen:
                 seen.add(d)
                 add(d, "earnings", f"{sym} quarterly results", "Quarterly earnings. Results and guidance often move the stock several percent either way.", "high")
-        add(_iso_date(cal.get("Ex-Dividend Date")), "dividend", f"{sym} ex-dividend date", "Buy on or after this date and you do not get the next dividend. The price usually drops by about the dividend.", "low")
+        xd = _iso_date(cal.get("Ex-Dividend Date"))
+        if xd:
+            seen_div.add(xd)
+        add(xd, "dividend", f"{sym} ex-dividend date", "Buy on or after this date and you do not get the next dividend. The price usually drops by about the dividend.", "low")
         add(_iso_date(cal.get("Dividend Date")), "dividend", f"{sym} dividend paid", "Dividend payment date.", "low")
     try:
         info = t.info or {}
         ts = info.get("earningsTimestamp") or info.get("earningsTimestampStart")
         d = _iso_date(ts) if ts else None
         if d and d not in seen:
+            seen.add(d)
             add(d, "earnings", f"{sym} quarterly results", "Quarterly earnings. Results and guidance often move the stock several percent either way.", "high")
     except Exception as exc:
         sys.stderr.write(f"info({sym}) failed: {exc}\n")
+    # Past ex-dividend dates.
+    try:
+        divs = t.dividends
+        if divs is not None and len(divs):
+            for ts, amount in divs.items():
+                d = _iso_date(ts)
+                if d and d not in seen_div and d < today.isoformat():
+                    seen_div.add(d)
+                    amt = _num(amount)
+                    add(d, "dividend", f"{sym} ex-dividend date", f"The stock went ex-dividend{f', {amt:.2f} per share' if amt else ''}. The price usually drops by about the dividend.", "low")
+    except Exception as exc:
+        sys.stderr.write(f"dividends({sym}) failed: {exc}\n")
     return events
 
 
@@ -421,13 +502,14 @@ def cmd_calendar(req):
     if req.get("today"):
         today = dt.date.fromisoformat(str(req["today"]))
     days = max(7, min(365, int(req.get("days", 90))))
-    lo = (today - dt.timedelta(days=1)).isoformat()
+    back = max(1, min(400, int(req.get("back", 1))))
+    lo = (today - dt.timedelta(days=back)).isoformat()
     hi = (today + dt.timedelta(days=days)).isoformat()
     events, notes = [], []
 
     for sym in [str(x).strip().upper() for x in req.get("tickers", [])[:40]]:
         try:
-            events.extend(_calendar_for_ticker(sym, lo, hi))
+            events.extend(_calendar_for_ticker(sym, lo, hi, today))
         except Exception as exc:
             notes.append(f"{sym}: company dates could not be read ({type(exc).__name__}).")
 
@@ -438,6 +520,12 @@ def cmd_calendar(req):
                 events.append({"date": end, "time": "14:00", "kind": "fed", "ticker": "", "impact": "high", "source": "federalreserve.gov",
                                "title": "Federal Reserve rate decision" + (" and projections" if sep else ""),
                                "detail": f"Two day meeting {year}-{a} to {end}. Rate decision at 2:00 pm Eastern, press conference after." + (" Includes new rate and economic projections." if sep else "") + (" 2027 dates are tentative." if year == 2027 else "")})
+
+    def add_macro(date, summary):
+        for key, title, impact, detail in BLS_KEEP:
+            if key.lower() in summary.lower():
+                return {"date": date, "time": "08:30", "kind": "macro", "ticker": "", "title": title, "detail": detail, "impact": impact, "source": "bls.gov"}
+        return None
 
     try:
         got = 0
@@ -452,10 +540,21 @@ def cmd_calendar(req):
         if not got:
             notes.append("The BLS schedule returned no inflation or jobs releases in this window. Check bls.gov/schedule.")
     except Exception as exc:
-        notes.append(f"Inflation and jobs release dates could not be fetched ({type(exc).__name__}). Check bls.gov/schedule.")
+        found = 0
+        for key, dates in BLS_FALLBACK.items():
+            for d in dates:
+                if lo <= d <= hi:
+                    ev = add_macro(d, key)
+                    if ev:
+                        ev["source"] = "bls.gov (dates saved with the app)"
+                        events.append(ev)
+                        found += 1
+        notes.append(f"Inflation and jobs release dates could not be fetched live ({_why(exc)}). "
+                     + (f"Showing the dates saved with the app, checked on October 25, 2026, which cover upcoming releases only. Check bls.gov/schedule for changes." if found else "Check bls.gov/schedule."))
 
-    y, m = today.year, today.month
-    for i in range(0, days // 28 + 2):
+    first = dt.date.fromisoformat(lo)
+    y, m = first.year, first.month
+    for i in range(0, (days + back) // 28 + 2):
         yy, mm = y + (m - 1 + i) // 12, (m - 1 + i) % 12 + 1
         d = _third_friday(yy, mm).isoformat()
         if lo <= d <= hi:
@@ -466,6 +565,137 @@ def cmd_calendar(req):
 
     events.sort(key=lambda e: (e["date"], e.get("time") or "", e["title"]))
     emit(type="result", cmd="calendar", events=events, notes=notes, start=lo, end=hi)
+
+
+# ------------------------------------------------------------ event move ----
+# How a symbol moved around an event, from daily bars (and five minute bars when the event has a clock time
+# in the trading session and happened within Yahoo's roughly sixty day intraday window). Read only.
+
+def _event_timing(hhmm):
+    if not hhmm:
+        return "unknown"
+    if hhmm < "09:30":
+        return "before_open"
+    if hhmm >= "16:00":
+        return "after_close"
+    return "during"
+
+
+def _add_minutes(hhmm, n):
+    h, m = int(hhmm[:2]), int(hhmm[3:5])
+    t = h * 60 + m + n
+    return f"{t // 60:02d}:{t % 60:02d}"
+
+
+def _local_index(idx):
+    """Exchange-local timestamps, whatever timezone Yahoo returned them in."""
+    try:
+        return idx.tz_convert("America/New_York") if getattr(idx, "tz", None) is not None else idx
+    except Exception:
+        return idx
+
+
+def _pct(a, b):
+    return None if a in (None, 0) or b is None else round(b / a - 1, 5)
+
+
+def _intraday_path(sym, date, hhmm):
+    """Five minute closes for the event day and the move from the event time. None when Yahoo has no such bars."""
+    import datetime as dt
+
+    d0 = dt.date.fromisoformat(date)
+    hist = _yf_ticker(sym).history(start=d0.isoformat(), end=(d0 + dt.timedelta(days=2)).isoformat(), interval="5m", auto_adjust=False)
+    if hist is None or hist.empty:
+        return None
+    idx = _local_index(hist.index)
+    rows = []
+    for ts, (_, r) in zip(idx, hist.iterrows()):
+        if ts.strftime("%Y-%m-%d") != date:
+            continue
+        o, c = _num(r.get("Open")), _num(r.get("Close"))
+        if o is not None and c is not None:
+            rows.append((ts.strftime("%H:%M"), o, c))
+    if len(rows) < 10:
+        return None
+    path = [[t, round(c, 4)] for t, _, c in rows]
+    out = {"path": path}
+    if hhmm and "09:30" <= hhmm < "16:00":
+        start = next((r for r in rows if r[0] >= hhmm), None)
+        if start:
+            p0 = start[1]
+            out["at"] = start[0]
+            out["price"] = round(p0, 4)
+
+            def close_at(t):
+                after = [r for r in rows if r[0] <= t]
+                return after[-1][2] if after else None
+            out["m30"] = _pct(p0, close_at(_add_minutes(start[0], 30)))
+            out["m120"] = _pct(p0, close_at(_add_minutes(start[0], 120)))
+            out["close"] = _pct(p0, rows[-1][2])
+    return out
+
+
+def _move_one(sym, date, hhmm, today):
+    import datetime as dt
+
+    d0 = dt.date.fromisoformat(date)
+    if d0 > today:
+        return {"ticker": sym, "ok": True, "pending": True, "note": "This event has not happened yet."}
+    hist = _yf_ticker(sym).history(start=(d0 - dt.timedelta(days=24)).isoformat(), end=(d0 + dt.timedelta(days=24)).isoformat(), interval="1d", auto_adjust=False)
+    if hist is None or hist.empty:
+        return {"ticker": sym, "ok": False, "error": "No daily prices were returned for this symbol and date."}
+    bars = []
+    for ts, r in hist.iterrows():
+        o, hi, lo, c = _num(r.get("Open")), _num(r.get("High")), _num(r.get("Low")), _num(r.get("Close"))
+        if None not in (o, hi, lo, c):
+            bars.append((ts.strftime("%Y-%m-%d"), o, hi, lo, c))
+    i0 = next((i for i, b in enumerate(bars) if b[0] >= date), None)
+    if i0 is None:
+        return {"ticker": sym, "ok": True, "pending": True, "note": "No trading day on or after this date yet."}
+    if i0 == 0:
+        return {"ticker": sym, "ok": False, "error": "Not enough earlier prices to measure a move."}
+    prior, day0 = bars[i0 - 1][4], bars[i0]
+    out = {"ticker": sym, "ok": True, "tradingDay": day0[0], "shiftedFromWeekend": day0[0] != date, "priorClose": round(prior, 4), "close": round(day0[4], 4),
+           "gap": _pct(prior, day0[1]), "day0": _pct(prior, day0[4]), "range": _pct(day0[3], day0[2])}
+    out["day1"] = _pct(day0[4], bars[i0 + 1][4]) if i0 + 1 < len(bars) else None
+    out["day1Date"] = bars[i0 + 1][0] if i0 + 1 < len(bars) else None
+    out["day5"] = _pct(prior, bars[i0 + 5][4]) if i0 + 5 < len(bars) else None
+    out["series"] = [[b[0], round(b[4], 4)] for b in bars[max(0, i0 - 6): i0 + 9]]
+    out["base"] = round(prior, 4)
+    out["priorDate"] = bars[i0 - 1][0]
+    if hhmm and day0[0] == date and (today - d0).days <= 55:
+        try:
+            intra = _intraday_path(sym, date, hhmm)
+            if intra:
+                out["intraday"] = intra
+        except Exception as exc:
+            sys.stderr.write(f"intraday({sym}) failed: {exc}\n")
+    return out
+
+
+def cmd_eventmove(req):
+    """Price move around one event for up to four symbols. Dates are YYYY-MM-DD, time is HH:MM Eastern or empty."""
+    import datetime as dt
+
+    date = str(req.get("date", ""))
+    try:
+        dt.date.fromisoformat(date)
+    except ValueError:
+        emit(type="error", message="That is not a valid event date.")
+        return
+    hhmm = str(req.get("time", "") or "")
+    if hhmm and not (len(hhmm) == 5 and hhmm[2] == ":" and hhmm[:2].isdigit() and hhmm[3:].isdigit()):
+        hhmm = ""
+    today = dt.date.today()
+    if req.get("today"):
+        today = dt.date.fromisoformat(str(req["today"]))
+    items = []
+    for sym in [str(x).strip().upper() for x in req.get("symbols", [])[:4]]:
+        try:
+            items.append(_move_one(sym, date, hhmm, today))
+        except Exception as exc:
+            items.append({"ticker": sym, "ok": False, "error": f"{type(exc).__name__}: {_trunc(exc, 200)}"})
+    emit(type="result", cmd="eventmove", date=date, time=hhmm, timing=_event_timing(hhmm), items=items)
 
 
 # ----------------------------------------------------------------- brief ----
@@ -730,7 +960,7 @@ def cmd_backtest(req):
 
 
 COMMANDS = {"doctor": cmd_doctor, "modelcheck": cmd_modelcheck, "analyze": cmd_analyze,
-            "backtest": cmd_backtest, "prices": cmd_prices, "quote": cmd_quote, "brief": cmd_brief, "bars": cmd_bars, "calendar": cmd_calendar}
+            "backtest": cmd_backtest, "prices": cmd_prices, "quote": cmd_quote, "brief": cmd_brief, "bars": cmd_bars, "calendar": cmd_calendar, "eventmove": cmd_eventmove}
 
 
 def main():

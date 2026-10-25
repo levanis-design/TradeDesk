@@ -99,6 +99,88 @@ class Calendar(unittest.TestCase):
         res = json.loads(buf.getvalue().splitlines()[-1])
         self.assertTrue(any("could not be fetched" in n for n in res["notes"]), res["notes"])
         self.assertTrue(any(e["kind"] == "fed" for e in res["events"]))
+        saved = [e for e in res["events"] if e["kind"] == "macro"]
+        self.assertTrue(any("Jobs report" == e["title"] and e["date"] == "2026-11-06" for e in saved), saved[:3])
+        self.assertTrue(all("saved with the app" in e["source"] for e in saved))
+        self.assertTrue(any("saved with the app" in n for n in res["notes"]))
+
+    def test_an_http_error_names_its_status_code(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "engine"))
+        import tradedesk_engine as E
+        import urllib.error
+        self.assertEqual(E._why(urllib.error.HTTPError("u", 403, "Forbidden", {}, None)), "HTTP 403")
+        self.assertEqual(E._why(OSError("x")), "OSError")
+
+
+class PastAndMoves(unittest.TestCase):
+    def test_past_events_come_with_results_against_expectations(self):
+        ev = run({"cmd": "calendar", "tickers": ["NVDA"], "days": 30, "back": 400, "today": "2026-10-25"})[-1]
+        rows = [e for e in ev["events"] if e["kind"] == "earnings"]
+        aug = next(e for e in rows if e["date"] == "2026-08-27")
+        self.assertEqual(aug["time"], "16:30")
+        self.assertIn("1.10 against 1.00 expected", aug["detail"])
+        self.assertIn("+10.0%", aug["detail"])
+        may = next(e for e in rows if e["date"] == "2026-05-28")
+        self.assertIn("-11.1%", may["detail"])
+        future = next(e for e in rows if e["date"] == "2026-11-18")
+        self.assertNotIn("Reported", future["detail"])
+
+    def test_past_dividends_and_fed_and_expiry_fall_in_the_window(self):
+        ev = run({"cmd": "calendar", "tickers": ["NVDA"], "days": 30, "back": 400, "today": "2026-10-25"})[-1]
+        kinds = {(e["kind"], e["date"]) for e in ev["events"]}
+        self.assertIn(("dividend", "2026-07-15"), kinds)
+        self.assertIn(("fed", "2026-09-16"), kinds)
+        self.assertTrue(any(k == "expiry" and d < "2026-10-01" for k, d in kinds))
+        self.assertEqual(ev["start"], "2025-09-20")
+
+    def test_default_window_still_starts_yesterday(self):
+        ev = run({"cmd": "calendar", "tickers": [], "days": 30, "today": "2026-10-25"})[-1]
+        self.assertEqual(ev["start"], "2026-10-24")
+
+    def test_move_around_a_big_day_with_a_benchmark(self):
+        ev = run({"cmd": "eventmove", "symbols": ["NVDA", "SPY"], "date": "2026-10-14", "time": "", "today": "2026-10-25"})[-1]
+        nv, spy = ev["items"]
+        self.assertEqual(ev["timing"], "unknown")
+        self.assertAlmostEqual(nv["day0"], 0.05, places=3)
+        self.assertAlmostEqual(nv["day1"], -0.02, places=3)
+        self.assertAlmostEqual(spy["day0"], 0.001, places=3)
+        self.assertEqual(nv["tradingDay"], "2026-10-14")
+        self.assertFalse(nv["shiftedFromWeekend"])
+        self.assertAlmostEqual(nv["gap"], 0.01, places=3)
+        self.assertIsNotNone(nv["day5"])
+        self.assertEqual(nv["base"], nv["priorClose"])
+        self.assertTrue(any(d == "2026-10-14" for d, _ in nv["series"]))
+
+    def test_a_weekend_event_is_measured_on_the_next_trading_day(self):
+        nv = run({"cmd": "eventmove", "symbols": ["NVDA"], "date": "2026-10-17", "today": "2026-10-25"})[-1]["items"][0]
+        self.assertTrue(nv["shiftedFromWeekend"])
+        self.assertEqual(nv["tradingDay"], "2026-10-19")
+
+    def test_an_event_in_the_future_is_pending_not_an_error(self):
+        nv = run({"cmd": "eventmove", "symbols": ["NVDA"], "date": "2026-12-01", "today": "2026-10-25"})[-1]["items"][0]
+        self.assertTrue(nv["ok"])
+        self.assertTrue(nv["pending"])
+
+    def test_intraday_reaction_from_the_event_time(self):
+        nv = run({"cmd": "eventmove", "symbols": ["NVDA"], "date": "2026-10-22", "time": "14:00", "today": "2026-10-25"})[-1]
+        it = nv["items"][0]["intraday"]
+        self.assertEqual(nv["timing"], "during")
+        self.assertEqual(it["at"], "14:00")
+        self.assertGreater(it["m30"], 0)
+        self.assertGreater(it["close"], it["m30"])
+
+    def test_no_intraday_for_after_hours_or_old_events(self):
+        a = run({"cmd": "eventmove", "symbols": ["NVDA"], "date": "2026-10-22", "time": "16:30", "today": "2026-10-25"})[-1]
+        self.assertEqual(a["timing"], "after_close")
+        self.assertNotIn("m30", a["items"][0].get("intraday", {}))
+        old = run({"cmd": "eventmove", "symbols": ["NVDA"], "date": "2026-08-27", "time": "14:00", "today": "2026-10-25"})[-1]["items"][0]
+        self.assertNotIn("intraday", old)
+
+    def test_bad_input_is_refused_or_reported_per_symbol(self):
+        self.assertEqual(run({"cmd": "eventmove", "symbols": ["NVDA"], "date": "tomorrow"})[-1]["type"], "error")
+        items = run({"cmd": "eventmove", "symbols": ["NOPE", "NVDA"], "date": "2026-10-14", "today": "2026-10-25"})[-1]["items"]
+        self.assertFalse(items[0]["ok"])
+        self.assertTrue(items[1]["ok"])
 
 
 if __name__ == "__main__":

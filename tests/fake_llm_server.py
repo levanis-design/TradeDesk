@@ -95,7 +95,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/tags":
-            data = json.dumps({"models": [
+            if os.environ.get("FAKE_DEMO"):  # model names for documentation screenshots
+                models = [{"name": "qwen3:latest", "size": int(5.2 * 1024 ** 3), "details": {"parameter_size": "8B", "quantization_level": "Q4_K_M"}},
+                          {"name": "gpt-oss:latest", "size": int(13 * 1024 ** 3), "details": {"parameter_size": "20B", "quantization_level": "MXFP4"}}]
+                data = json.dumps({"models": models}).encode()
+            else:
+              data = json.dumps({"models": [
                 {"name": "fake:1b", "size": int(1.2 * 1024 ** 3), "details": {"parameter_size": "1B", "quantization_level": "Q4_K_M"}},
                 {"name": "huge:70b", "size": int(42 * 1024 ** 3), "details": {"parameter_size": "70B", "quantization_level": "Q4_K_M"}}]}).encode()
             self.send_response(200)
