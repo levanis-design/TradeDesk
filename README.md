@@ -126,12 +126,19 @@ Electron is bundled in the installer, so people you share it with need no Node.j
 
 The installer is not code-signed, so Windows SmartScreen shows "Windows protected your PC" on first run. Choose **More info**, then **Run anyway**. Removing the warning needs a purchased code-signing certificate.
 
-### From source
+### Quick start from the downloaded source
 
-You need Windows 10 or 11 and Node.js 22 or newer.
+Download or clone the repository, then double-click **`start.bat`**. On the first run it:
+
+1. checks for Node.js 22 or newer and, if it is missing, offers to install it with Windows Package Manager (or opens the Node.js download page);
+2. installs the app's packages (`npm install`, about 250 MB including Electron);
+3. starts TradeDesk.
+
+Later runs skip straight to step 3. `start.bat debug` keeps the window open and shows messages. If Windows says "Windows protected your PC" about the file, choose **More info**, then **Run anyway**. Python, Ollama and the models are installed afterwards from inside the app (see First run below).
+
+Or from a terminal, with Node.js 22 or newer already installed:
 
 ```
-cd TradeDesk
 npm install
 npm start
 ```
