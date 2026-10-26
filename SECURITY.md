@@ -1,5 +1,21 @@
 # Security review
 
+## v2.5.0 functional verification — October 25, 2026
+
+- 98 JavaScript tests and 50 Python tests passed, including local-date regressions for UTC rollover and time zones ahead of UTC.
+- The Chromium UI harness passed 311 checks with a fake model, deterministic market/social data, and saved public research samples. This includes watchlist file/paste imports and buy zones, research readers, heat maps, risk calculations, queues, cancellation, charts, and responsive layouts.
+- A native Electron smoke check passed using a separate temporary user-data folder: startup, the real preload and IPC sender validation, settings persistence, sample watchlist import, and sandbox preferences. Existing user holdings and saved API keys were not used.
+- `npm run dist` built `dist/TradeDesk-Setup-2.5.0.exe`. Inspection confirmed the bundled source contains the watchlist importer and security guard, required runtime dependencies, no saved holdings/journal/key files, and no engine bytecode caches. The setup file was built but not installed; it is unsigned.
+- One live SPY quote/history request succeeded without a portfolio or API keys (251 history rows, latest close dated October 23, 2026). This is a connectivity check, not a verification of market-data accuracy or every provider endpoint.
+- Live npm advisory audit: zero known vulnerabilities. The installed engine's Python audit examined 89 package records and reported zero known vulnerabilities among auditable packages; TradingAgents itself was skipped because its GitHub distribution is not in the PyPI advisory catalog. Vendored research parsers were source-reviewed and exercised with fixtures, not certified by this package audit.
+- Fixed a Watchlist cache inconsistency that could show a different current price in the detail chart and the buy-zone comparison. Both now use the same quote; a dedicated UI assertion checks equality.
+- Fixed local-date validation that rejected valid dates in positive UTC offsets. Uploaded-list date limits and screenshot analyses use the same local-date convention. The screenshot generator now stops if a sample analysis fails.
+- Screenshots use invented sample holdings, a fake model, and public-record fixtures. Environment files, private-key files, saved local data, dependencies, generated installers, test artifacts, and Python caches are excluded from Git. No matching production credentials were found by the source-pattern checks.
+
+Live SEC/House responses, real model quality/performance, clean-PC installation and upgrades, desktop notifications, and real portfolio imports remain outside this verification. See the operating assumptions below.
+
+## Original v2.1.0 review
+
 Reviewed on October 25, 2026. This is a source review and dependency audit, not a guarantee that every vulnerability has been found.
 
 ## Changes made
@@ -33,7 +49,7 @@ IPC restrictions follow [Electron's security guidance](https://www.electronjs.or
 - Local holdings, journals, settings, and reports are ordinary files under the user profile. API keys are encrypted; the rest of the financial data is not encrypted by the app. Protect the Windows account and disk.
 - Model endpoints are configurable and support HTTP for local servers. Use loopback addresses or HTTPS on a trusted server. A remote HTTP endpoint exposes prompts and holdings to network observers. Selecting a cloud provider or a remote model server sends the requested context there.
 - Authenticode verification is tested with simulated signatures; a real Ollama installer was not downloaded or executed during this review. Python/Git installation, GPU behavior, live market data accuracy, and a production model were not validated.
-- Windows installer packaging, code signing, and a packaged Electron security review remain release checks. The browser UI harness does not certify the packaged Electron binary.
+- The v2.5.0 verification above adds a Windows installer build and a native Electron smoke check. Code signing, installation/upgrade testing, and a complete packaged-binary security review remain release checks. The browser UI harness does not certify the packaged Electron binary.
 - Keep Electron, Node dependencies, Python, engine dependencies, and Ollama patched. Advisory results describe the audit date and installed versions only.
 
 If you find a vulnerability, contact the repository owner privately before disclosing sensitive reproduction details. Do not put API keys or real portfolio data in public issues.

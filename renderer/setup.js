@@ -120,6 +120,7 @@
     f.temp = h('input', { type: 'number', step: '0.1', min: 0, max: 2, value: s.temperature, placeholder: 'default', style: { width: '90px' } });
     f.bench = h('input', { type: 'text', value: s.benchmark, class: 'ticker', style: { width: '100px' } });
     f.cash = h('input', { type: 'number', step: 'any', min: 0, value: s.cashOverride, placeholder: 'use holdings file', style: { width: '160px' } });
+    f.sec = h('input', { type: 'text', id: 'secContact', value: s.secUserAgent || '', placeholder: 'Your Name you@example.com', style: { width: '300px' } });
     f.python = h('input', { type: 'text', value: s.pythonPath, placeholder: 'leave blank to auto-detect' });
     const analysts = h('div', { class: 'row center' }, [['market', 'Market'], ['social', 'Sentiment'], ['news', 'News'], ['fundamentals', 'Fundamentals']].map(([v, l]) =>
       h('label', { class: 'check' }, h('input', { type: 'checkbox', dataset: { analyst: v }, checked: s.analysts.includes(v) }), l)));
@@ -129,7 +130,7 @@
     const read = () => ({
       provider: f.provider.value, ollamaUrl: f.ollamaUrl.value, backendUrl: f.backendUrl.value, quickModel: f.quick.value, deepModel: f.deep.value,
       debateRounds: f.debate.value, riskRounds: f.risk.value, language: f.lang.value, temperature: f.temp.value, benchmark: f.bench.value,
-      cashOverride: f.cash.value, pythonPath: f.python.value, analysts: U.$$('[data-analyst]', el).filter((c) => c.checked).map((c) => c.dataset.analyst),
+      cashOverride: f.cash.value, secUserAgent: f.sec.value, pythonPath: f.python.value, analysts: U.$$('[data-analyst]', el).filter((c) => c.checked).map((c) => c.dataset.analyst),
     });
     const save = async () => {
       const r = await td.setSettings(read());
@@ -159,6 +160,7 @@
       h('div', { class: 'row top', style: { marginTop: '10px' } }, field('Debate rounds', f.debate, 'More rounds, slower.'), field('Risk rounds', f.risk), field('Output language', f.lang), field('Temperature', f.temp), field('Benchmark', f.bench, 'For scoring.')),
       h('div', { style: { marginTop: '10px' } }, h('div', { class: 'lbl' }, 'Analysts to include (fewer is faster)'), analysts),
       h('div', { class: 'row top', style: { marginTop: '10px' } }, field('Cash override (optional)', f.cash, 'Replaces cash from the holdings file.'), field('Python path (optional)', f.python)),
+      h('div', { class: 'row top', style: { marginTop: '10px' } }, field('SEC contact (for Research)', f.sec, 'Your name and email. The SEC requires it on every request for filings and results. It is sent only to the SEC and is not needed for anything else.')),
       costNote,
       h('div', { class: 'row center', style: { marginTop: '14px' } }, h('button', { class: 'btn primary', onclick: save }, 'Save settings'), check),
       checks);

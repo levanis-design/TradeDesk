@@ -9,6 +9,9 @@
     { id: 'watch', title: 'Watchlist', ico: 'watch' },
     { id: 'holdings', title: 'Holdings', ico: 'holdings' },
     { id: 'calendar', title: 'Calendar', ico: 'calendar' },
+    { id: 'heatmap', title: 'Heat map', ico: 'heatmap' },
+    { id: 'research', title: 'Research', ico: 'research' },
+    { id: 'whatif', title: 'What if', ico: 'whatif' },
     { id: 'track', title: 'Track record', ico: 'track' },
     { id: 'setup', title: 'Setup', ico: 'setup', foot: true },
     { id: 'how', title: 'How it works', ico: 'how', foot: true },
@@ -20,6 +23,9 @@
     watch: ['M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z', 'M12 14.6a2.6 2.6 0 100-5.2 2.6 2.6 0 000 5.2z'],
     holdings: ['M3 7.5h18v11.5H3z', 'M8.5 7.5V5.2A1.2 1.2 0 019.7 4h4.6a1.2 1.2 0 011.2 1.2v2.3', 'M3 12.5h18'],
     calendar: ['M4 6h16v14H4z', 'M4 10.5h16', 'M8.5 3.5v4', 'M15.5 3.5v4'],
+    heatmap: ['M3.5 4h9v9h-9z', 'M12.5 4h8v5h-8z', 'M12.5 9h8v11h-8z', 'M3.5 13h9v7h-9z'],
+    research: ['M6 3.5h8l4 4V20.5H6z', 'M14 3.5v4h4', 'M9 12h6', 'M9 15.5h6'],
+    whatif: ['M5 4v16', 'M12 4v16', 'M19 4v16', 'M3 9h4', 'M10 15h4', 'M17 8h4'],
     track: ['M4 12a8 8 0 102.4-5.7', 'M4 4.5v3.8h3.8', 'M12 8v4.2l2.8 1.8'],
     setup: ['M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4z', 'M19.2 13.5l1.6 1.2-1.7 2.9-1.9-.6a7 7 0 01-1.6.9l-.4 2h-3.4l-.4-2a7 7 0 01-1.6-.9l-1.9.6-1.7-2.9 1.6-1.2a7 7 0 010-1.9L4.6 10.4l1.7-2.9 1.9.6a7 7 0 011.6-.9l.4-2h3.4l.4 2a7 7 0 011.6.9l1.9-.6 1.7 2.9-1.6 1.2a7 7 0 010 1.9z'],
     how: ['M12 21a9 9 0 100-18 9 9 0 000 18z', 'M9.6 9.4a2.5 2.5 0 114 2c-.9.6-1.6 1-1.6 2.1', 'M12 16.8v.2'],
@@ -277,6 +283,28 @@
       if (q && q.ok && q.price != null) out[p.ticker] = q.price;
       if (Number(p.manualPrice) > 0) out[p.ticker] = Number(p.manualPrice);
     }
+    return out;
+  };
+
+
+  // Holdings or watchlist: one small selector used wherever tickers are listed, so the two stay distinct.
+  const LV_KEY = 'tradedesk.listview.';
+  TD.getListView = (id, dflt = 'both') => { try { const v = window.localStorage.getItem(LV_KEY + id); return ['held', 'watch', 'both'].includes(v) ? v : dflt; } catch { return dflt; } };
+  TD.listSelector = function (id, current, onChange) {
+    const wrap = h('div', { class: 'listsel', role: 'group', 'aria-label': 'Which tickers to show' });
+    [['held', 'Holdings'], ['watch', 'Watchlist'], ['both', 'Both']].forEach(([v, label]) => wrap.append(h('button', { type: 'button', class: 'rng' + (v === current ? ' active' : ''), dataset: { view: v }, 'aria-pressed': String(v === current),
+      onclick: () => { try { window.localStorage.setItem(LV_KEY + id, v); } catch { /* not remembered */ } onChange(v); } }, label)));
+    return wrap;
+  };
+  // [{ticker, held, watched, note}] for the chosen view, holdings first.
+  TD.tickersFor = function (view) {
+    const held = (TD.state.holdings.positions || []).map((p) => p.ticker).filter(Boolean);
+    const watch = (TD.state.watch || []);
+    const wset = new Map(watch.map((w) => [w.ticker, w]));
+    const hset = new Set(held);
+    const out = [];
+    if (view !== 'watch') for (const t of [...new Set(held)]) out.push({ ticker: t, held: true, watched: wset.has(t), note: (wset.get(t) || {}).note || '' });
+    if (view !== 'held') for (const w of watch) if (!(view === 'both' && hset.has(w.ticker))) out.push({ ticker: w.ticker, held: hset.has(w.ticker), watched: true, note: w.note || '' });
     return out;
   };
 

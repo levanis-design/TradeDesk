@@ -42,7 +42,7 @@ function createIpc(ctx) {
   const engineReady = () => fs.existsSync(enginePython());
 
   const components = ctx.components || createComponents({
-    fetchFn, getSettings: () => store.getSettings(), engineReady,
+    fetchFn, getSettings: () => store.getSettings(), engineReady, enginePython,
   });
 
   function secretsFor(settings) {
@@ -382,6 +382,39 @@ function createIpc(ctx) {
 
     h('holdings:save', ({ positions, cash }) => ({ ok: true, holdings: store.setHoldings({ ...store.getHoldings(), positions, cash }) }));
 
+    // ---- watchlist upload: a file or pasted table with ticker, price, four buy zones and a reason
+    const watchLib = require('./watchlist');
+    const watchPreview = (file, rows) => {
+      const token = Math.random().toString(36).slice(2);
+      importCache.set(token, { file, sheets: [{ name: 'Watchlist', rows }] });
+      if (importCache.size > 5) importCache.delete(importCache.keys().next().value);
+      const p = watchLib.parseWatchRows(rows);
+      return p.ok ? { ok: true, token, file, preview: p } : fail(p.error);
+    };
+    h('watch:pick', async () => {
+      const r = await dialog.showOpenDialog(getWindow(), { title: 'Choose a watchlist file', properties: ['openFile'], filters: [{ name: 'Spreadsheets', extensions: ['xlsx', 'csv'] }] });
+      if (r.canceled || !r.filePaths[0]) return { ok: true, canceled: true };
+      const parsed = await holdingsLib.readFileRows(r.filePaths[0]);
+      const sheet = parsed.sheets.find((s) => watchLib.parseWatchRows(s.rows).ok) || parsed.sheets[0];
+      if (!sheet) return fail('The file has no sheets.');
+      return watchPreview(path.basename(r.filePaths[0]), sheet.rows);
+    });
+    h('watch:paste', ({ text }) => {
+      const t = String(text || '');
+      if (t.trim().length < 3) return fail('Paste your table first, including the header row.');
+      if (t.length > 2_000_000) return fail('That is too much text. Paste only the table.');
+      return watchPreview('pasted data', holdingsLib.parseTable(t));
+    });
+    h('watch:commit', ({ token, mode = 'merge', listDate = '' }) => {
+      const c = importCache.get(token);
+      if (!c) return fail('That import expired. Choose the file again.');
+      const p = watchLib.parseWatchRows(c.sheets[0].rows);
+      if (!p.ok) return fail(p.error);
+      if (listDate && (!watchLib.isIsoDate(listDate) || listDate > reqs.todayLocal())) return fail('The list date must be a past or present date.');
+      const clean = watchLib.cleanItems(p.items, listDate);
+      return { ok: true, added: clean.items.length, items: store.importWatch(clean.items, { mode: mode === 'replace' ? 'replace' : 'merge', listDate: clean.listDate, source: c.file }) };
+    });
+
     // ---- watchlist
     h('watch:list', () => ({ ok: true, items: store.getWatchlist() }));
     h('watch:add', ({ ticker, note }) => ({ ok: true, items: store.addWatch(ticker, note) }));
@@ -471,7 +504,7 @@ function createIpc(ctx) {
 
 
     // ---- market data for the Analyze and Holdings pages. Read only; never takes the heavy lock.
-    h('quote:get', async ({ tickers, years = 5, news = false, force = false }) => {
+    async function getQuotes({ tickers, years = 5, news = false, force = false }) {
       const list = [...new Set((tickers || []).map(cleanTicker).filter(Boolean))].slice(0, 40);
       if (!list.length) return fail('Give at least one ticker.');
       if (!engineReady()) return fail('The analysis engine is not installed yet, so market data cannot be fetched. Open Setup.');
@@ -499,7 +532,8 @@ function createIpc(ctx) {
       }
       const items = list.map((t) => cached(t) || quoteMiss.get(key(t)) || { ticker: t, ok: false, error: 'No data returned.' });
       return { ok: true, items };
-    });
+    }
+    h('quote:get', (args) => getQuotes(args));
 
     // ---- candles at a chosen interval. Read only, cached for a minute.
     h('bars:get', async ({ tickers, interval = '1d', range = '1y' }) => {
@@ -523,6 +557,27 @@ function createIpc(ctx) {
       }
       const items = list.map((t) => fresh(t) || (failure && failure.ticker === t ? failure : { ticker: t, ok: false, error: 'No bars returned for this interval.' }));
       return { ok: true, items };
+    });
+
+    // ---- market heat map: percent change for a list of tickers. Read only, cached for five minutes.
+    const heatCache = new Map();
+    h('heatmap:get', async ({ tickers, force = false } = {}) => {
+      const list = [...new Set((tickers || []).map((x) => { try { return cleanTicker(x); } catch { return ''; } }).filter(Boolean))].slice(0, 150);
+      if (!list.length) return fail('Give at least one ticker.');
+      if (!engineReady()) return fail('The analysis engine is not installed yet, so market data cannot be fetched. Open Setup.');
+      const key = list.slice().sort().join(',');
+      const c = heatCache.get(key);
+      if (!force && c && Date.now() - c.at < 5 * 60 * 1000) return { ok: true, items: c.items, fetchedAt: c.fetchedAt, cached: true };
+      const run = readChain.then(async () => {
+        const res = await startEngine({ cmd: 'heatmap', tickers: list }).promise;
+        if (!res.ok) throw new Error(res.error || 'Market data request failed.');
+        return res.result.items || [];
+      });
+      readChain = run.catch(() => {});
+      const items = await run;
+      const fetchedAt = new Date().toISOString();
+      heatCache.set(key, { at: Date.now(), items, fetchedAt });
+      return { ok: true, items, fetchedAt };
     });
 
     // ---- upcoming events that can move prices, plus the ones the person added by hand
@@ -656,10 +711,106 @@ function createIpc(ctx) {
       } finally { release(); }
     });
 
+    // ---- research: SEC filings, reported results, House disclosures. Public records only.
+    const researchCache = new Map();
+    async function research(cmd, req, key, ttl, force) {
+      if (!engineReady()) return fail('The analysis engine is not installed yet. Open Setup.');
+      const ua = store.getSettings().secUserAgent;
+      if (cmd !== 'congress' && !ua) return fail('The SEC asks every program to identify itself. Open Setup, enter your name and email under SEC contact, and try again.');
+      const c = researchCache.get(key);
+      if (!force && c && Date.now() - c.at < ttl) return { ok: true, ...c.data, cached: true };
+      const run = readChain.then(async () => {
+        const job = startEngine({ cmd, ...req, secUserAgent: ua });
+        const res = await job.promise;
+        if (!res.ok) throw new Error(res.error || 'The request failed.');
+        const { type, cmd: _c, ...data } = res.result;
+        return { ...data, fetchedAt: new Date().toISOString() };
+      });
+      readChain = run.catch(() => {});
+      const data = await run;
+      researchCache.set(key, { at: Date.now(), data });
+      return { ok: true, ...data };
+    }
+    const tickerList = (arr, max) => [...new Set((arr || []).map((x) => { try { return cleanTicker(x); } catch { return ''; } }).filter(Boolean))].slice(0, max);
+    h('research:filings', ({ tickers, forms, days = 90, force = false } = {}) => {
+      const list = tickerList(tickers, 25);
+      if (!list.length) return fail('Give at least one ticker.');
+      const f = (Array.isArray(forms) ? forms : ['8-K']).filter((x) => ['8-K', '10-Q', '10-K'].includes(x));
+      const d = Math.max(1, Math.min(365, Math.round(Number(days) || 90)));
+      return research('filings', { tickers: list, forms: f.length ? f : ['8-K'], days: d }, `f|${list.slice().sort()}|${f}|${d}`, 10 * 60 * 1000, force);
+    });
+    h('research:filing', ({ link, form } = {}) => {
+      if (!/^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/\d{1,10}\/\d{18}\/\d{10}-\d{2}-\d{6}-index\.html?$/.test(String(link || ''))) return fail('That is not a filing link on sec.gov.');
+      const f = ['8-K', '8-K/A', '10-Q', '10-K'].includes(form) ? form : '';
+      return research('filing', { link, form: f }, `d|${link}`, 24 * 60 * 60 * 1000, false);
+    });
+    h('research:facts', ({ ticker, force = false } = {}) => {
+      const t = tickerList([ticker], 1)[0];
+      if (!t) return fail('Enter a ticker.');
+      return research('facts', { ticker: t }, `x|${t}`, 60 * 60 * 1000, force);
+    });
+    h('research:congress', ({ members, tickers, days = 60, year, limit = 12, force = false } = {}) => {
+      const m = (Array.isArray(members) ? members : []).map((x) => String(x).replace(/[^\p{L} ,.'-]/gu, '').trim().slice(0, 60)).filter(Boolean).slice(0, 10);
+      const t = tickerList(tickers, 25);
+      const d = Math.max(1, Math.min(365, Math.round(Number(days) || 60)));
+      const y = Math.max(2014, Math.min(new Date().getFullYear(), Math.round(Number(year) || new Date().getFullYear())));
+      const lim = Math.max(1, Math.min(25, Math.round(Number(limit) || 12)));
+      return research('congress', { members: m, tickers: t, days: d, year: y, limit: lim, cacheDir: path.join(paths.userData, 'ptr-cache') },
+        `c|${m}|${t}|${d}|${y}|${lim}`, 60 * 60 * 1000, force);
+    });
+
+    // ---- price alerts: stored on this computer, checked while the app is open
+    const cleanAlert = (a) => {
+      let ticker = '';
+      try { ticker = a.ticker ? cleanTicker(a.ticker) : ''; } catch { ticker = ''; }
+      const price = Number(a.price);
+      if (!ticker || !Number.isFinite(price) || price <= 0) return null;
+      return {
+        id: String(a.id || '').replace(/[^0-9a-z]/gi, '').slice(0, 40) || `al${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+        ticker, direction: a.direction === 'below' ? 'below' : 'above', price: Math.round(price * 10000) / 10000,
+        note: String(a.note || '').trim().slice(0, 120), active: a.active !== false,
+        createdAt: typeof a.createdAt === 'string' ? a.createdAt.slice(0, 30) : new Date().toISOString(),
+        firedAt: typeof a.firedAt === 'string' ? a.firedAt.slice(0, 30) : null,
+        firedPrice: Number.isFinite(Number(a.firedPrice)) && a.firedPrice !== null ? Number(a.firedPrice) : null,
+      };
+    };
+    const alertList = () => (store.getMeta().alerts || []).map(cleanAlert).filter(Boolean);
+    h('alerts:get', () => ({ ok: true, alerts: alertList() }));
+    h('alerts:save', ({ alerts } = {}) => {
+      const clean = (Array.isArray(alerts) ? alerts : []).slice(0, 100).map(cleanAlert).filter(Boolean);
+      store.setMeta({ alerts: clean });
+      return { ok: true, alerts: clean };
+    });
+    // Fetch current prices, mark alerts whose line was crossed, tell the person once.
+    h('alerts:check', async () => {
+      const all = alertList();
+      const live = all.filter((a) => a.active && !a.firedAt);
+      if (!live.length) return { ok: true, alerts: all, fired: [] };
+      const res = await getQuotes({ tickers: [...new Set(live.map((a) => a.ticker))], years: 1, force: true });
+      if (!res.ok) return res;
+      const px = {};
+      for (const it of res.items) if (it.ok && Number.isFinite(it.price)) px[it.ticker] = it.price;
+      const fired = [];
+      for (const a of live) {
+        const p = px[a.ticker];
+        if (p === undefined) continue;
+        if ((a.direction === 'above' && p >= a.price) || (a.direction === 'below' && p <= a.price)) {
+          a.firedAt = new Date().toISOString(); a.firedPrice = p; fired.push(a);
+        }
+      }
+      const byId = new Map(fired.map((a) => [a.id, a]));
+      const next = all.map((a) => byId.get(a.id) || a);
+      if (fired.length) {
+        store.setMeta({ alerts: next });
+        for (const a of fired) if (ctx.notify) ctx.notify({ title: `${a.ticker} crossed ${a.price}`, body: `Last price ${a.firedPrice}. This is your own price alert, not advice.` });
+      }
+      return { ok: true, alerts: next, fired, checkedAt: new Date().toISOString() };
+    });
+
     h('shell:open', async ({ url }) => {
       let u;
       try { u = new URL(url); } catch { return fail('Invalid link.'); }
-      if (u.protocol !== 'https:' || u.username || u.password || u.port || !['github.com', 'ollama.com', 'www.python.org', 'git-scm.com'].includes(u.hostname)) return fail('That link is not on the allowed list.');
+      if (u.protocol !== 'https:' || u.username || u.password || u.port || !['github.com', 'ollama.com', 'www.python.org', 'git-scm.com', 'www.sec.gov', 'disclosures-clerk.house.gov'].includes(u.hostname)) return fail('That link is not on the allowed list.');
       await shell.openExternal(u.href);
       return { ok: true };
     });

@@ -90,10 +90,20 @@
     '1m': { label: '1 minute', ranges: ['1D', '5D'] },
     '5m': { label: '5 minutes', ranges: ['1D', '5D', '1M'] },
     '15m': { label: '15 minutes', ranges: ['5D', '1M'] },
-    '1h': { label: '1 hour', ranges: ['1M', '3M', '6M', '1Y'] },
+    '1h': { label: '1 hour', ranges: ['5D', '1M', '3M', '6M', '1Y'] },
     '1d': { label: '1 day', ranges: ['1M', '3M', '6M', '1Y', '5Y', 'Max'] },
     '1wk': { label: '1 week', ranges: ['1Y', '5Y', 'Max'] },
   };
+
+  // One-press ranges, as on a brokerage app: each picks the bar size that suits the range.
+  const QUICK = [
+    { id: '1D', label: '1D', interval: '5m', range: '1D', note: '5 minute bars' },
+    { id: '1W', label: '1W', interval: '1h', range: '5D', note: 'hourly bars' },
+    { id: '1M', label: '1M', interval: '1h', range: '1M', note: 'hourly bars' },
+    { id: '3M', label: '3M', interval: '1d', range: '3M', note: 'daily bars' },
+    { id: '1Y', label: '1Y', interval: '1d', range: '1Y', note: 'daily bars' },
+    { id: '5Y', label: '5Y', interval: '1wk', range: '5Y', note: 'weekly bars' },
+  ];
 
   // Merge neighbouring bars until there are at most maxN, so a year of minutes stays readable.
   function aggregate(bars, maxN) {
@@ -149,5 +159,5 @@
     }).map((x) => x.r);
   }
 
-  return { totals, allocation, weightOf, timeline, slice, change, RANGES, PERIODS, INTERVALS, aggregate, candles, sortRows };
+  return { totals, allocation, weightOf, timeline, slice, change, RANGES, PERIODS, INTERVALS, QUICK, aggregate, candles, sortRows };
 });

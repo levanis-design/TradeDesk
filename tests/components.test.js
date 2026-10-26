@@ -23,7 +23,7 @@ function make({ tags = null, runs = {}, fetchExtra = null, platform = 'win32', e
     if (url.endsWith('/api/version')) return json({ version: '0.9' });
     throw new Error('unexpected ' + url);
   };
-  const c = createComponents({ platform, runFn, fetchFn, getSettings: () => set, engineReady: () => engine, sleep: async () => {}, env: { LOCALAPPDATA: 'C:\\L' }, fs: { existsSync: exists, mkdirSync() {}, mkdtempSync: (prefix) => prefix + 'test', rmdirSync() {}, unlinkSync() {}, createWriteStream: () => new Writable({ write(_chunk, _encoding, cb) { cb(); } }) }, spawnFn: () => ({ unref() {} }) });
+  const c = createComponents({ platform, runFn, fetchFn, getSettings: () => set, engineReady: () => engine, enginePython: () => (engine ? 'C:\\E\\python.exe' : null), sleep: async () => {}, env: { LOCALAPPDATA: 'C:\\L' }, fs: { existsSync: exists, mkdirSync() {}, mkdtempSync: (prefix) => prefix + 'test', rmdirSync() {}, unlinkSync() {}, createWriteStream: () => new Writable({ write(_chunk, _encoding, cb) { cb(); } }) }, spawnFn: () => ({ unref() {} }) });
   return { c, calls };
 }
 
@@ -159,4 +159,28 @@ test('python install via winget: judged by what is on the computer afterwards, w
   const r = await c.install('python');
   assert.ok(calls.some((x) => x[0] === 'winget' && x.includes('Python.Python.3.12') && x.includes('--silent')));
   assert.equal(r.ok, false); assert.match(r.error, /Close and reopen/);
+});
+
+test('pdf reader: blocked without the engine, missing with it, installs with pip and proves the import', async () => {
+  let r = make();
+  assert.equal((await r.c.status()).items.find((i) => i.id === 'pdfreader').status, 'blocked');
+  let installed = false;
+  r = make({ engine: true, runs: { 'C:\\E\\python.exe': (args) => {
+    if (args[0] === '-c') return installed ? { code: 0, out: '5.9.0' } : { code: 1, out: 'No module named pypdf' };
+    if (args.includes('pypdf')) { installed = true; return { code: 0, out: 'ok' }; }
+    return { code: 1, out: '' };
+  } } });
+  const row = (await r.c.status()).items.find((i) => i.id === 'pdfreader');
+  assert.equal(row.status, 'missing'); assert.equal(row.required, false); assert.equal(row.action, 'install');
+  const res = await r.c.install('pdfreader');
+  assert.equal(res.ok, true);
+  assert.ok(r.calls.some((c) => c.includes('pip') && c.includes('pypdf')));
+  assert.equal((await r.c.status()).items.find((i) => i.id === 'pdfreader').status, 'ok');
+});
+
+test('pdf reader: a failed import after pip is reported, not hidden', async () => {
+  const { c } = make({ engine: true, runs: { 'C:\\E\\python.exe': (args) => (args[0] === '-c' ? { code: 1, out: 'nope' } : { code: 0, out: 'pip ok' }) } });
+  const res = await c.install('pdfreader');
+  assert.equal(res.ok, false);
+  assert.match(res.error, /cannot be imported/);
 });

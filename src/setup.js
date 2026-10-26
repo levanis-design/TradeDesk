@@ -82,7 +82,12 @@ async function installEngine({ baseDir, preferred = '', onLog = () => {}, runFn 
     if (r.code === 0) {
       // Do not trust the exit code alone: prove the package imports.
       const v = await runFn(py, ['-c', 'import tradingagents, sys; print("import ok", sys.version.split()[0])'], { onLog, timeoutMs: 120000 });
-      if (v.code === 0) return { ok: true, python: py, version: pick.text };
+      if (v.code === 0) {
+        // Optional: lets the House disclosure reader work without poppler. Failure is not an error.
+        const pdf = await runFn(py, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', 'pypdf'], { onLog, timeoutMs: 120000 });
+        if (pdf.code !== 0) onLog('Optional PDF reader (pypdf) did not install. House disclosures will be listed but not read.');
+        return { ok: true, python: py, version: pick.text };
+      }
       last = `pip finished but the package does not import (exit ${v.code}).\n` + v.out.slice(-1000);
       onLog('pip finished, but TradingAgents does not import. ' + v.out.slice(-300));
       continue;

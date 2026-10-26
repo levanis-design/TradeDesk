@@ -93,8 +93,11 @@
         Object.entries(I).map(([k, v]) => h('option', { value: k }, v.label)));
       ivSel.value = tl.interval;
       const seg = (id, label, on) => h('button', { class: 'rng' + (tl.style === id ? ' active' : ''), type: 'button', dataset: { style: id }, onclick: on }, label);
+      const quick = h('div', { class: 'grp quickgrp', id: 'tlquick', role: 'group', 'aria-label': 'Quick range' }, h('span', { class: 'lbl' }, 'Range'),
+        P().QUICK.map((q) => h('button', { class: 'rng' + (tl.interval === q.interval && tl.range === q.range ? ' active' : ''), type: 'button', dataset: { quick: q.id }, title: q.note,
+          onclick: () => { tl.interval = q.interval; tl.range = q.range; paintTimeline(); } }, q.label)));
       const ctl = h('div', { class: 'chartctl' },
-        h('div', { class: 'grp' }, h('span', { class: 'lbl' }, 'Show'), whoSel),
+        h('div', { class: 'grp' }, h('span', { class: 'lbl' }, 'Show'), whoSel), quick,
         h('div', { class: 'grp' }, h('span', { class: 'lbl' }, 'Chart'), seg('line', 'Line', () => { tl.style = 'line'; paintTimeline(); }), seg('candles', 'Candles', () => { tl.style = 'candles'; paintTimeline(); })),
         h('div', { class: 'grp' }, h('span', { class: 'lbl' }, 'Each bar is'), ivSel),
         h('div', { class: 'grp rangegrp' }, I[tl.interval].ranges.map((r) => h('button', { class: 'rng' + (r === tl.range ? ' active' : ''), type: 'button', dataset: { range: r }, onclick: () => { tl.range = r; paintTimeline(); } }, r))));
@@ -132,7 +135,9 @@
         if (single) bars = by[tl.who] || [];
         else { const c = P().candles(pos, by); bars = c.bars; skipped = c.skipped; start = c.start; }
         if (bars.length < 2) { box.append(h('div', { class: 'empty-note' }, `No ${I[tl.interval].label} bars came back${live.err ? ': ' + live.err : ''}. Yahoo only keeps minute bars for a few days and short intervals for a few weeks, and markets are closed at weekends.`)); }
-        else box.append(TDCharts.ohlc({ bars, style: tl.style, height: 260, fmt, hideVolume: !single, name: single ? `${tl.who} ${tl.style}` : 'Value of current holdings, by bar' }));
+        else { const f = bars[0]; const l = bars[bars.length - 1]; const ch = f && l && f[4] ? l[4] / f[4] - 1 : null;
+          if (ch != null) box.append(h('div', { class: 'row center tlchange' }, h('span', { class: ch >= 0 ? 'pos' : 'neg', id: 'tlchange' }, `${ch >= 0 ? '+' : '−'}${(Math.abs(ch) * 100).toFixed(2)}%`), h('span', { class: 'hint' }, `over this range, ${I[tl.interval].label} bars`))); }
+        if (bars.length >= 2) box.append(TDCharts.ohlc({ bars, style: tl.style, height: 260, fmt, hideVolume: !single, name: single ? `${tl.who} ${tl.style}` : 'Value of current holdings, by bar' }));
         foot([
           skipped.length ? `Not included, no bars: ${skipped.join(', ')}.` : '',
           !single && tl.style === 'candles' && bars.length ? 'Candles for the whole portfolio add up each holding’s own open, high, low and close. The high and low assume every holding peaked at the same moment, so they are outer limits, not what a statement would show.' : '',

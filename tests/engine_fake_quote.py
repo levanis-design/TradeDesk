@@ -10,6 +10,8 @@ import tradedesk_engine as E  # noqa: E402
 DAILY = {"NVDA": 0.004, "SPY": 0.001, "GOOG": -0.002, "AAPL": 0.002, "MSFT": 0.001}
 # TD_FAKE_SCALE shrinks the invented price drift so documentation screenshots show believable numbers. Tests leave it at 1.
 SCALE = float(os.environ.get("TD_FAKE_SCALE", "1"))
+# TD_FAKE_NOISE adds seeded day-to-day swings to the five-year history, for screenshots of the risk page. Tests leave it off.
+NOISE = os.environ.get("TD_FAKE_NOISE") == "1"
 
 
 class FakeTicker:
@@ -63,16 +65,27 @@ class FakeTicker:
             freq = {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h", "1wk": "7D", "1d": "B"}[interval]
             idx = pd.date_range(end="2026-10-23 15:59" if interval not in ("1d", "1wk") else "2026-10-23", periods=n, freq=freq)
             px, rows = 100.0, []
+            import random
+            rng = random.Random(self.symbol + interval + period)
             for i, _ in enumerate(idx):
                 o = px
-                px *= 1 + self.rate + (0.002 if i % 3 == 0 else -0.0015) * SCALE
+                if NOISE and interval == "1d":
+                    px *= 1 + self.rate + rng.gauss(0, 0.014)
+                else:
+                    px *= 1 + self.rate + (0.002 if i % 3 == 0 else -0.0015) * SCALE
                 rows.append({"Open": o, "Close": px, "High": max(o, px) * 1.002, "Low": min(o, px) * 0.998, "Volume": 1000 + i})
             return pd.DataFrame(rows, index=idx)
         years = int(period.rstrip("y"))
         idx = pd.bdate_range(end="2026-10-23", periods=252 * years)
         px, rows = 100.0, []
+        import random
+        rng = random.Random(self.symbol)
         for i, _ in enumerate(idx):
-            px *= 1 + self.rate + (0.004 if i % 7 == 0 else -0.003 if i % 5 == 0 else 0) * (SCALE if SCALE != 1 else 1)
+            if NOISE:
+                vol = 0.019 if self.symbol not in ("SPY", "VOO") else 0.009
+                px *= 1 + self.rate + rng.gauss(0, vol) - (0.06 if rng.random() < 0.002 else 0)
+            else:
+                px *= 1 + self.rate + (0.004 if i % 7 == 0 else -0.003 if i % 5 == 0 else 0) * (SCALE if SCALE != 1 else 1)
             rows.append({"Open": px * 0.998, "Close": px, "High": px * 1.01, "Low": px * 0.99, "Volume": 1_000_000 + i})
         return pd.DataFrame(rows, index=idx)
 

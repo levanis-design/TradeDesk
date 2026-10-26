@@ -1,6 +1,6 @@
 'use strict';
 const path = require('path');
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Menu, session } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, dialog, shell, safeStorage, Menu, session } = require('electron');
 
 const { createStore } = require('./store');
 const { createIpc } = require('./ipc');
@@ -44,6 +44,7 @@ app.whenReady().then(() => {
   });
   ipc = createIpc({
     store, dialog, shell, safeStorage, send, getWindow: () => win, version: app.getVersion(), quit: () => app.quit(),
+    notify: ({ title, body }) => { try { if (Notification.isSupported()) new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200) }).show(); } catch { /* a missing notification must not stop the check */ } },
     paths: {
       userData,
       engineDir: path.join(userData, 'engine'),

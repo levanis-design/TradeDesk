@@ -293,7 +293,7 @@ BAR_RANGES = {
     "1m": ("1d", "5d"),
     "5m": ("1d", "5d", "1mo"),
     "15m": ("5d", "1mo"),
-    "1h": ("1mo", "3mo", "6mo", "1y"),
+    "1h": ("5d", "1mo", "3mo", "6mo", "1y"),
     "1d": ("1mo", "3mo", "6mo", "1y", "5y", "max"),
     "1wk": ("1y", "5y", "max"),
 }
@@ -959,8 +959,75 @@ def cmd_backtest(req):
          text=summary.render())
 
 
+def _research(fn_name, req, **kw):
+    import research
+    try:
+        return getattr(research, fn_name)(req, **kw)
+    except research.ResearchError as exc:
+        emit(type="error", message=str(exc))
+        return None
+
+
+HEAT_PERIODS = {"1d": 1, "1w": 5, "1m": 21, "3m": 63}
+
+
+def cmd_heatmap(req):
+    """Percent change over 1 day, 1 week, 1 month and 3 months for a list of tickers. Read only."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    syms = []
+    for sym in req.get("tickers", []):
+        sym = str(sym).strip().upper()
+        if sym and sym not in syms:
+            syms.append(sym)
+    syms = syms[:150]
+
+    def one(sym):
+        try:
+            hist = _yf_ticker(sym).history(period="6mo", interval="1d", auto_adjust=False)
+            closes = [float(c) for c in hist["Close"].dropna()] if hist is not None and not hist.empty else []
+            if len(closes) < 2:
+                return {"ticker": sym, "ok": False, "error": "No price history."}
+            item = {"ticker": sym, "ok": True, "price": closes[-1], "asof": hist.index[-1].strftime("%Y-%m-%d")}
+            for key, n in HEAT_PERIODS.items():
+                item[key] = (closes[-1] / closes[-1 - n] - 1) * 100 if len(closes) > n else None
+            return item
+        except Exception as exc:
+            return {"ticker": sym, "ok": False, "error": f"{type(exc).__name__}: {_trunc(exc, 160)}"}
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        items = list(pool.map(one, syms))
+    emit(type="result", cmd="heatmap", items=items)
+
+
+def cmd_filings(req):
+    out = _research("filings", req)
+    if out is not None:
+        emit(type="result", cmd="filings", **out)
+
+
+def cmd_filing(req):
+    out = _research("filing_detail", req)
+    if out is not None:
+        emit(type="result", cmd="filing", **out)
+
+
+def cmd_facts(req):
+    out = _research("company_facts", req)
+    if out is not None:
+        emit(type="result", cmd="facts", **out)
+
+
+def cmd_congress(req):
+    out = _research("congress", req)
+    if out is not None:
+        emit(type="result", cmd="congress", **out)
+
+
 COMMANDS = {"doctor": cmd_doctor, "modelcheck": cmd_modelcheck, "analyze": cmd_analyze,
-            "backtest": cmd_backtest, "prices": cmd_prices, "quote": cmd_quote, "brief": cmd_brief, "bars": cmd_bars, "calendar": cmd_calendar, "eventmove": cmd_eventmove}
+            "backtest": cmd_backtest, "prices": cmd_prices, "quote": cmd_quote, "brief": cmd_brief, "bars": cmd_bars, "calendar": cmd_calendar, "eventmove": cmd_eventmove,
+            "filings": cmd_filings, "filing": cmd_filing,
+    "heatmap": cmd_heatmap, "facts": cmd_facts, "congress": cmd_congress}
 
 
 def main():

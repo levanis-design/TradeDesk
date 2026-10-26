@@ -6,6 +6,7 @@
     await TD.refreshStatus();
     await TD.showTerms();          // every launch; nothing else is usable until the notice is accepted
     TD.go(TD.setupDone() ? 'analyze' : 'setup');
+    if (TD.startAlerts) TD.startAlerts().catch(() => {});
   } catch (e) {
     document.getElementById('view').textContent = 'TradeDesk could not start: ' + e.message;
   }

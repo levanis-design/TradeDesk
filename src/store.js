@@ -28,6 +28,7 @@ const DEFAULTS = {
   pythonPath: '',
   benchmark: 'SPY',
   cashOverride: '',
+  secUserAgent: '',
 };
 
 const clampInt = (v, lo, hi, d) => {
@@ -64,6 +65,8 @@ function cleanSettings(input, base = DEFAULTS) {
   out.benchmark = String(s.benchmark || 'SPY').trim().toUpperCase().replace(/[^A-Z0-9.\-^=]/g, '').slice(0, 15) || 'SPY';
   const c = String(s.cashOverride === undefined || s.cashOverride === null ? '' : s.cashOverride).trim();
   out.cashOverride = c === '' || !Number.isFinite(Number(c)) || Number(c) < 0 ? '' : String(Number(c));
+  const ua = String(s.secUserAgent || '').trim().replace(/[\r\n]+/g, ' ').slice(0, 200);
+  out.secUserAgent = /^[^@\s]+.*\S+@\S+\.\S+$/.test(ua) && !ua.includes('you@example.com') ? ua : '';
   return out;
 }
 
@@ -157,6 +160,20 @@ function createStore(dir, deps = {}) {
       if (!items.find((i) => i.ticker === t)) items.push({ ticker: t, note: String(note).slice(0, 200), addedAt: now().toISOString() });
       write('watchlist.json', { items });
       return items;
+    },
+    // Upload from a spreadsheet: adds or updates tickers with a price, four buy zones and a reason. Holdings are never touched.
+    importWatch(items, { mode = 'merge', listDate = '', source = '' } = {}) {
+      const stamp = now().toISOString();
+      const cur = mode === 'replace' ? [] : api.getWatchlist();
+      const by = new Map(cur.map((i) => [i.ticker, i]));
+      for (const it of items) {
+        const old = by.get(it.ticker) || { ticker: it.ticker, note: '', addedAt: stamp };
+        by.set(it.ticker, { ...old, why: it.why, strongBuy: it.strongBuy, goodBuy: it.goodBuy, acceptable: it.acceptable, avoid: it.avoid,
+          listPrice: it.price, listDate: listDate || '', listSource: String(source).slice(0, 120), importedAt: stamp });
+      }
+      const next = [...by.values()];
+      write('watchlist.json', { items: next });
+      return next;
     },
     removeWatch(ticker) {
       const t = cleanTicker(ticker);

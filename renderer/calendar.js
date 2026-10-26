@@ -66,8 +66,13 @@
       if (S.err) root.append(h('div', { class: 'callout warn' }, S.err));
       if (S.loading) root.append(h('div', { class: 'hint' }, 'Fetching events…'));
       if (S.data && S.data.notes && S.data.notes.length) root.append(h('div', { class: 'callout small' }, S.data.notes.map((n) => h('div', null, n))));
-      root.append(h('div', { class: 'calgrid2' }, monthCard(evs), agendaCard(evs)));
-      root.append(movePanel(evs));
+      // Three panes that can be dragged: month and agenda side by side, the market-move panel underneath. Each scrolls inside its own frame.
+      const stage = h('div', { class: 'calstage', id: 'calstage' });
+      const top = h('div', { class: 'caltop', id: 'caltop' });
+      const monthEl = monthCard(evs); const agendaEl = agendaCard(evs);
+      top.append(monthEl, TD.splitter({ dir: 'col', grid: top, prop: '--calc', first: () => monthEl, min: 320, minOther: 240, id: 'cal-cols', label: 'Resize the month and the agenda' }), agendaEl);
+      stage.append(top, TD.splitter({ dir: 'row', grid: stage, prop: '--calr', first: () => top, min: 200, minOther: 160, id: 'cal-rows', label: 'Resize the calendar and what the market did' }), movePanel(evs));
+      root.append(stage);
       root.append(h('div', { class: 'hint' }, `${S.data ? `Fetched ${new Date(S.data.fetchedAt).toLocaleTimeString()}. ` : ''}Company dates come from Yahoo Finance, the Fed schedule from federalreserve.gov (2027 dates are tentative until the Fed confirms them), inflation and jobs releases from the Bureau of Labor Statistics, option expiry is calculated. Product launches, conferences and other announcements with no fixed date are not in any free feed, so add the ones you care about yourself. This is a list of dates, not a forecast of what the price will do.`));
     }
 
@@ -152,7 +157,7 @@
       const weight = pos ? window.Portfolio.weightOf(e.ticker, TD.state.holdings.positions || [], TD.state.holdings.cash, TD.priceMap()) : null;
       const happened = e.date <= todayIso();
       const row = h('div', { class: `ev k-${e.kind} imp-${e.impact}` + (S.sel && evKey(S.sel) === evKey(e) ? ' sel' : ''), dataset: { kind: e.kind, date: e.date } },
-        h('div', { class: 'evhead' },
+        h('div', { class: 'evhead', onclick: (ev) => { if (ev.target.closest('button')) return; row.classList.toggle('open'); } },
           marker(e.kind),
           h('span', { class: `kbadge k-${e.kind}` }, KINDS[e.kind] || e.kind),
           h('b', null, e.title),

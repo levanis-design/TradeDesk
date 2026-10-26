@@ -44,6 +44,11 @@ const INFO = {
     what: 'The open-source framework of AI analysts, researchers, a trader and a risk team.',
     use: 'Runs every analysis and backtest. Installed into a private environment in the app data folder, not system-wide.',
   },
+  pdfreader: {
+    name: 'PDF reader (pypdf)', required: false, size: 'about 1 MB', source: 'PyPI, the Python package index, installed into the private engine environment',
+    what: 'A small library that reads text from PDF files.',
+    use: 'Optional. Lets Research read House stock disclosures inside TradeDesk. Without it the disclosures are listed with a link to the original PDF.',
+  },
   ollama: {
     name: 'Ollama', required: true, size: 'about 1 GB', source: 'ollama.com, signature checked before it runs',
     what: 'A free program that runs language models on your own computer.',
@@ -110,6 +115,16 @@ function createComponents(deps = {}) {
     if (engineReady()) Object.assign(eng, { status: 'ok', detail: 'Installed in the app data folder.' });
     else Object.assign(eng, { status: 'missing', detail: py.pick ? 'Not installed yet.' : 'Install Python first.', action: py.pick ? 'engine' : null, actionLabel: 'Install', blockedBy: py.pick ? null : 'python' });
     out.push(eng);
+
+    const pdf = { id: 'pdfreader', ...INFO.pdfreader };
+    const enginePy = deps.enginePython ? deps.enginePython() : null;
+    if (!engineReady() || !enginePy) Object.assign(pdf, { status: 'blocked', detail: 'Install the engine first.', blockedBy: 'engine' });
+    else {
+      const chk = await runFn(enginePy, ['-c', 'import pypdf; print(pypdf.__version__)'], { timeoutMs: 20000 });
+      if (chk.code === 0) Object.assign(pdf, { status: 'ok', detail: `Installed (pypdf ${chk.out.trim().split(/\r?\n/).pop()}).` });
+      else Object.assign(pdf, { status: 'missing', detail: 'Not installed. Optional.', action: 'install', actionLabel: 'Install' });
+    }
+    out.push(pdf);
 
     const row = { id: 'ollama', ...INFO.ollama };
     if (!uses(s)) {
@@ -249,6 +264,16 @@ function createComponents(deps = {}) {
         // winget exits non-zero when the package is already up to date; judge by what is now on the computer.
         const now = id === 'python' ? !!(await findPython({ preferred: '', platform, runFn })).pick : !!(await has('git', ['--version']));
         if (!now) return { ok: false, error: `winget finished (exit ${r.code}) but ${INFO[id].name} still cannot be found. Close and reopen TradeDesk so Windows refreshes its program list, then check again.\n${(r.out || '').slice(-400)}` };
+        return { ok: true };
+      }
+
+      if (id === 'pdfreader') {
+        const py = deps.enginePython ? deps.enginePython() : null;
+        if (!engineReady() || !py) return { ok: false, error: 'Install the engine first.' };
+        say({ phase: 'install', pct: null, text: 'Installing pypdf into the private engine environment…' });
+        const r = await runFn(py, ['-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off', 'pypdf'], { onLog: (l) => say({ phase: 'install', text: l.slice(0, 200) }), heartbeatMs: 20000, timeoutMs: 180000 });
+        const v = await runFn(py, ['-c', 'import pypdf'], { timeoutMs: 20000 });
+        if (v.code !== 0) return { ok: false, error: `pip finished (exit ${r.code}) but pypdf cannot be imported.\n${(r.out || '').slice(-400)}` };
         return { ok: true };
       }
 

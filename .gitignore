@@ -19,5 +19,8 @@ tests/npm-audit.json
 tests/python-audit.json
 tests/python-installed.json
 tests/ui-artifacts/
+secrets.json
+data/
+ptr-cache/
 .DS_Store
 Thumbs.db

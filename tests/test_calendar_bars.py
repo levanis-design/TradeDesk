@@ -41,6 +41,24 @@ class Bars(unittest.TestCase):
         self.assertTrue(items[1]["ok"])
 
 
+class Heatmap(unittest.TestCase):
+    def test_changes_come_back_for_each_period_and_bad_symbols_are_flagged(self):
+        ev = run({"cmd": "heatmap", "tickers": ["NVDA", "msft", "NOPE", "NVDA", ""]})[-1]
+        self.assertEqual(ev["type"], "result")
+        self.assertEqual([i["ticker"] for i in ev["items"]], ["NVDA", "MSFT", "NOPE"])
+        good, bad = ev["items"][0], ev["items"][2]
+        self.assertTrue(good["ok"])
+        for key in ("1d", "1w", "1m", "3m"):
+            self.assertIsInstance(good[key], float)
+        self.assertFalse(bad["ok"])
+
+    def test_one_period_matches_the_closing_prices(self):
+        item = run({"cmd": "heatmap", "tickers": ["MSFT"]})[-1]["items"][0]
+        bars = run({"cmd": "bars", "tickers": ["MSFT"], "interval": "1d", "range": "6mo"})[-1]["items"][0]["bars"]
+        closes = [b[4] for b in bars]
+        self.assertAlmostEqual(item["1d"], (closes[-1] / closes[-2] - 1) * 100, places=2)
+
+
 class Calendar(unittest.TestCase):
     def setUp(self):
         self.ev = run({"cmd": "calendar", "tickers": ["NVDA", "MSFT"], "days": 120})[-1]

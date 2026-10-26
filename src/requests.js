@@ -55,7 +55,8 @@ function todayLocal(now = new Date()) {
 function validDate(d, now = new Date()) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'Use the format YYYY-MM-DD.';
   const t = new Date(d + 'T00:00:00');
-  if (Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== d) return 'That is not a real date.';
+  if (Number.isNaN(t.getTime()) || t.getFullYear() !== Number(d.slice(0, 4)) ||
+      t.getMonth() + 1 !== Number(d.slice(5, 7)) || t.getDate() !== Number(d.slice(8, 10))) return 'That is not a real date.';
   if (d > todayLocal(now)) return 'The date cannot be in the future.';
   return null;
 }

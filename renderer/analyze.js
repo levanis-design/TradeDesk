@@ -306,10 +306,10 @@
 
   // ------------------------------------------------------------ my tickers
   function mineList() {
-    const held = (TD.state.holdings.positions || []).map((p) => p.ticker);
-    const watch = (TD.state.watch || []).map((w) => w.ticker);
-    const recent = W.entries.slice(0, 12).map((e) => e.ticker);
-    return [...new Set([...held, ...watch, ...recent])].slice(0, 30);
+    const view = TD.getListView('analyze');
+    const base = TD.tickersFor(view).map((x) => x.ticker);
+    const recent = view === 'both' ? W.entries.slice(0, 12).map((e) => e.ticker) : [];
+    return [...new Set([...base, ...recent])].slice(0, 40);
   }
   async function loadMine() {
     if (!(TD.state.info || {}).engineInstalled) return;
@@ -329,9 +329,18 @@
     if (!box) return;
     clear(box);
     const list = mineList();
+    const view = TD.getListView('analyze');
     box.append(h('div', { class: 'row center' }, h('h2', null, 'My tickers'), h('div', { class: 'spacer' }),
+      TD.listSelector('analyze', view, () => { paintMine(); loadMine(); }),
+      h('button', { class: 'btn small', id: 'mineQueue', disabled: !list.length, title: `Line up every ticker shown here in the Queue`, onclick: async () => {
+        const nr = TD.notReady(); if (nr) return toast(nr, 'error');
+        const r = await td.queueAdd({ items: mineList(), date: U.today(), includePortfolio: true, profile: W.profile || 'standard' });
+        if (!r.ok) return toast(r.error, 'error');
+        TD.setQueue(r.queue); toast(`${r.added} added to the queue.`, 'ok'); TD.showQueueTab();
+      } }, `Analyze all ${list.length}`),
+      h('button', { class: 'btn small', id: 'mineUpload', title: 'Upload a watchlist spreadsheet instead of adding tickers one by one', onclick: () => TD.watchImportFlow(() => { paintMine(); loadMine(); }) }, 'Upload watchlist'),
       h('button', { class: 'btn small', title: 'Fetch prices again', onclick: () => { loadMine(); } }, 'Refresh')));
-    if (!list.length) { box.append(h('div', { class: 'empty-note' }, 'Your holdings, watchlist and recent analyses appear here. Import holdings or add to the watchlist to fill it.')); return; }
+    if (!list.length) { box.append(h('div', { class: 'empty-note' }, view === 'held' ? 'No holdings yet. Import them on the Holdings page.' : view === 'watch' ? 'Your watchlist is empty. Add tickers on the Watchlist page.' : 'Your holdings, watchlist and recent analyses appear here. Import holdings or add to the watchlist to fill it.')); return; }
     if (W.mineErr) box.append(h('div', { class: 'hint bad' }, W.mineErr));
     const rows = h('div', { class: 'minelist' });
     list.forEach((t) => {
@@ -340,7 +349,7 @@
       const held = !!TD.positionFor(t);
       const up = q && q.ok && (q.changePct || 0) >= 0;
       rows.append(h('button', { class: 'mine-row' + (t === W.sel ? ' sel' : ''), type: 'button', dataset: { ticker: t }, onclick: () => selectTicker(t) },
-        h('span', { class: 'mt' }, h('b', null, t), held ? h('span', { class: 'held-dot', title: 'In your holdings' }, '●') : null),
+        h('span', { class: 'mt' }, h('b', null, t), held ? h('span', { class: 'held-dot', title: 'In your holdings' }, '●') : null, !held && (TD.state.watch || []).some((w) => w.ticker === t) ? h('span', { class: 'watch-dot', title: 'On your watchlist' }, '◇') : null),
         q && q.ok ? TDCharts.spark((q.history || []).slice(-126).map((r) => r[1])) : h('span', { class: 'spark' }),
         h('span', { class: 'mp' }, q && q.ok ? h('span', null, money(q.price), h('span', { class: up ? 'pos' : 'neg' }, ' ' + pct(q.changePct))) : h('span', { class: 'hint' }, q && !q.ok ? 'no data' : '…')),
         e ? U.ratingBadge(e.rating) : h('span', { class: 'hint' }, 'no analysis')));

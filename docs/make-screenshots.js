@@ -13,6 +13,7 @@ const { chromium } = require('playwright');
 const ROOT = path.join(__dirname, '..');
 const { createStore } = require(path.join(ROOT, 'src', 'store'));
 const { createIpc } = require(path.join(ROOT, 'src', 'ipc'));
+const { todayLocal } = require(path.join(ROOT, 'src', 'requests'));
 const PY = process.env.TD_PY;
 if (!PY || !fs.existsSync(PY)) { console.error('Set TD_PY to a Python with TradingAgents installed.'); process.exit(2); }
 const OUT = path.join(__dirname, 'images');
@@ -30,9 +31,9 @@ const DARK = !!process.env.DARK;
   let page = null;
   const paths = { userData: tmp, engineDir: path.join(tmp, 'engine'), dataDir: path.join(tmp, 'ta'), enginePython: PY, engineScript: path.join(tmp, 'engine_demo.py') };
   // The app starts the engine with a trimmed environment, so the fake's price scale is set inside a small wrapper script.
-  fs.writeFileSync(paths.engineScript, `import os, runpy, sys\nos.environ['TD_FAKE_SCALE'] = '0.12'\nsys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'tests'))})\nrunpy.run_path(${JSON.stringify(path.join(ROOT, 'tests', 'engine_fake_all.py'))}, run_name='__main__')\n`);
+  fs.writeFileSync(paths.engineScript, `import os, runpy, sys\nos.environ['TD_FAKE_SCALE'] = '0.12'\nos.environ['TD_FAKE_NOISE'] = '1'\nsys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'tests'))})\nrunpy.run_path(${JSON.stringify(path.join(ROOT, 'tests', 'engine_fake_all.py'))}, run_name='__main__')\n`);
   const ipc = createIpc({
-    store, dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }), showSaveDialog: async () => ({ canceled: true }) },
+    store, dialog: { showOpenDialog: async () => { const f = global.__pick; global.__pick = null; return f ? { canceled: false, filePaths: [f] } : { canceled: true, filePaths: [] }; }, showSaveDialog: async () => ({ canceled: true }) },
     shell: { showItemInFolder() {}, openExternal() {} }, safeStorage: { isEncryptionAvailable: () => true },
     send: (ch, payload) => { if (page) page.evaluate(([c, p]) => window.__emit && window.__emit(c, p), [ch, payload]).catch(() => {}); },
     getWindow: () => null, version: 'docs', paths, validateSender: () => true,
@@ -46,7 +47,7 @@ const DARK = !!process.env.DARK;
   ] });
   ['GOOG', 'AMZN', 'TSLA'].forEach((t) => store.addWatch(t, ''));
 
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.TD_CHROMIUM ? { executablePath: process.env.TD_CHROMIUM } : {});
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 860 }, colorScheme: DARK ? 'dark' : 'light', deviceScaleFactor: 1 });
   page = await ctx.newPage();
   page.on('dialog', (d) => d.accept());
@@ -72,8 +73,12 @@ const DARK = !!process.env.DARK;
   const mc = await handlers.get('engine:modelcheck')(null, {});
   console.log('model check passed:', mc.passed);
   await page.evaluate(() => TD.refreshStatus());
-  const day = new Date().toISOString().slice(0, 10);
-  for (const t of ['NVDA', 'AAPL']) { const r = await handlers.get('analyze:run')(null, { ticker: t, date: day, includePortfolio: true }); console.log('analysis', t, r.ok ? 'ok' : r.error); }
+  const day = todayLocal();
+  for (const t of ['NVDA', 'AAPL']) {
+    const r = await handlers.get('analyze:run')(null, { ticker: t, date: day, includePortfolio: true });
+    if (!r.ok) throw new Error(`Sample analysis for ${t} failed: ${r.error}`);
+    console.log('analysis', t, 'ok');
+  }
   await page.evaluate(() => TD.refreshStatus());
 
   await nav('setup'); await page.waitForSelector('.comp'); await shot('setup-components');
@@ -91,8 +96,33 @@ const DARK = !!process.env.DARK;
   await page.evaluate(() => { const m = document.querySelector('#view'); if (m) m.scrollTo(0, 99999); }); await shot('holdings-positions');
 
   await nav('calendar'); await page.waitForSelector('#calroot .ev', { timeout: 30000 }); await shot('calendar');
+  await page.locator('#calroot .ev .evhead, #calroot .ev').first().scrollIntoViewIfNeeded().catch(() => {});
   await page.locator('.recentbtn').first().click(); await page.waitForSelector('#movepanel .movetable', { timeout: 30000 });
   await page.locator('#movepanel').scrollIntoViewIfNeeded(); await shot('calendar-market-move');
+
+  await nav('heatmap'); await page.waitForSelector('#hmstage .hm-tile', { timeout: 90000 }); await page.click('#hmp-1m'); await sleep(300); await shot('heatmap');
+
+  // Research uses saved SEC and House samples, not live data, so these shots are repeatable.
+  store.setSettings({ secUserAgent: 'Sample User sample@example.org' });
+  await page.evaluate(() => TD.refreshStatus());
+  await nav('research'); await page.fill('#fltickers', 'KO, AAPL'); await page.selectOption('#fldays', '365'); await page.click('#flgo');
+  await page.waitForSelector('#fltable tbody tr', { timeout: 60000 }); await shot('research-filings');
+  await page.locator('#fltable tbody tr').first().click(); await page.waitForSelector('#filingModal .sumitem', { timeout: 30000 }); await shot('research-filing-summary'); await page.keyboard.press('Escape');
+  await page.click('.ptab[data-tab="facts"]'); await page.fill('#fxticker', 'KO'); await page.click('#fxgo');
+  await page.waitForSelector('#fxtable tbody tr', { timeout: 60000 }); await shot('research-results');
+  await page.click('.ptab[data-tab="congress"]'); await page.click('#cggo'); await page.waitForSelector('.cgrep', { timeout: 90000 }); await shot('research-congress');
+  await page.locator('.cgrep:has(table) .namebtn').first().click(); await page.waitForSelector('#reportModal', { timeout: 10000 }); await shot('research-congress-summary'); await page.keyboard.press('Escape');
+  await nav('whatif'); await page.fill('#wiTicker', 'NVDA'); await page.fill('#wiAmount', '2500'); await page.fill('#wiLimit', '300'); await page.fill('#wiExit', '90'); await page.click('#wiGo');
+  await page.waitForSelector('#wiOptions', { timeout: 60000 }); await shot('what-if');
+  await page.locator('#wiHistory').scrollIntoViewIfNeeded(); await shot('what-if-history', '#wiHistory');
+  await page.setViewportSize({ width: 1360, height: 1300 }); await page.locator('#wiOptions').scrollIntoViewIfNeeded(); await shot('what-if-options', '#wiOptions'); await page.setViewportSize({ width: 1360, height: 860 });
+
+  // Watchlist upload, using a small invented sample file.
+  await nav('watch'); await sleep(500);
+  global.__pick = path.join(ROOT, 'tests', 'fixtures', 'watchlist-sample.csv');
+  await page.click('#wUpload'); await page.click('#wiFile'); await page.waitForSelector('#wiTable'); await page.fill('#wiDate', '2026-10-01'); await shot('watchlist-upload');
+  await page.click('#wiGo'); await page.waitForSelector('#modal', { state: 'hidden' }); await sleep(2500);
+  await page.locator('.wl-row[data-ticker="AMD"]').click(); await page.waitForSelector('#zoneGrid'); await sleep(1500); await shot('watchlist-zones');
 
   await nav('track'); await sleep(1200); await shot('journal');
 
